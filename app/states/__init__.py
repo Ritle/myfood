@@ -1,2 +1,1 @@
 """Finite state machine definitions."""
-

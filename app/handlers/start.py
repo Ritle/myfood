@@ -4,8 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.keyboards.main_menu import main_menu
 from app.handlers.profile import begin_profile
+from app.keyboards.main_menu import main_menu
 from app.repositories.profiles import get_user_by_telegram_id
 from app.repositories.users import get_or_create_user
 

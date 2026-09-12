@@ -15,4 +15,3 @@ class ProfileSetup(StatesGroup):
     fat = State()
     carbs = State()
     water = State()
-

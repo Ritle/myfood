@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -24,7 +24,7 @@ async def save_profile(
         raise LookupError("Telegram user was not initialized; send /start first")
     for field, value in profile.items():
         setattr(user, field, value)
-    user.profile_completed_at = datetime.now(timezone.utc)
+    user.profile_completed_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(user)
     return user

@@ -10,8 +10,8 @@ def test_calculates_male_maintenance_target() -> None:
     target = calculate_daily_calorie_target(
         gender="male",
         birth_date=date(1996, 1, 1),
-        height_cm=Decimal("180"),
-        weight_kg=Decimal("80"),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
         activity_level="moderate",
         goal="maintain",
         today=date(2026, 1, 1),
@@ -24,8 +24,8 @@ def test_calculates_female_weight_loss_target() -> None:
     target = calculate_daily_calorie_target(
         gender="female",
         birth_date=date(1996, 1, 1),
-        height_cm=Decimal("180"),
-        weight_kg=Decimal("80"),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
         activity_level="moderate",
         goal="lose",
         today=date(2026, 1, 1),
@@ -43,8 +43,8 @@ def test_calculator_rejects_minors() -> None:
         calculate_daily_calorie_target(
             gender="male",
             birth_date=date(2010, 1, 1),
-            height_cm=Decimal("170"),
-            weight_kg=Decimal("60"),
+            height_cm=Decimal(170),
+            weight_kg=Decimal(60),
             activity_level="light",
             goal="maintain",
             today=date(2026, 1, 1),

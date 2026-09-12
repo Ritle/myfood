@@ -22,4 +22,3 @@ async def get_or_create_user(
     await session.commit()
     await session.refresh(user)
     return user
-

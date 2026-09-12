@@ -1,5 +1,5 @@
-from datetime import date
-from decimal import Decimal, InvalidOperation
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -13,6 +13,7 @@ from app.repositories.users import get_or_create_user
 from app.services.nutrition import age_on, calculate_daily_calorie_target
 from app.services.profiles import get_profile, persist_profile
 from app.states.profile import ProfileSetup
+from app.utils.numbers import parse_decimal, parse_integer
 
 router = Router()
 GENDER_LABELS = {"Женщина": "female", "Мужчина": "male"}
@@ -100,8 +101,9 @@ async def choose_gender(message: Message, state: FSMContext) -> None:
 async def enter_birth_date(message: Message, state: FSMContext) -> None:
     try:
         birth_date = date.fromisoformat((message.text or "").strip())
-        age = age_on(birth_date, date.today())
-        if birth_date >= date.today() or age < 18 or age > 100:
+        today = datetime.now(UTC).date()
+        age = age_on(birth_date, today)
+        if birth_date >= today or age < 18 or age > 100:
             raise ValueError
     except ValueError:
         await message.answer(
@@ -121,7 +123,7 @@ async def ask_weight(message: Message, state: FSMContext) -> None:
 @router.message(ProfileSetup.height)
 async def enter_height(message: Message, state: FSMContext) -> None:
     value = parse_decimal(message.text)
-    if value is None or not Decimal("100") <= value <= Decimal("250"):
+    if value is None or not Decimal(100) <= value <= Decimal(250):
         await message.answer("Введите рост числом от 100 до 250 см.")
         return
     await state.update_data(height_cm=value)
@@ -131,7 +133,7 @@ async def enter_height(message: Message, state: FSMContext) -> None:
 @router.message(ProfileSetup.current_weight)
 async def enter_current_weight(message: Message, state: FSMContext) -> None:
     value = parse_decimal(message.text)
-    if value is None or not Decimal("30") <= value <= Decimal("350"):
+    if value is None or not Decimal(30) <= value <= Decimal(350):
         await message.answer("Введите вес числом от 30 до 350 кг.")
         return
     await state.update_data(current_weight_kg=value)
@@ -142,7 +144,7 @@ async def enter_current_weight(message: Message, state: FSMContext) -> None:
 @router.message(ProfileSetup.target_weight)
 async def enter_target_weight(message: Message, state: FSMContext) -> None:
     value = parse_decimal(message.text)
-    if value is None or not Decimal("30") <= value <= Decimal("350"):
+    if value is None or not Decimal(30) <= value <= Decimal(350):
         await message.answer("Введите целевой вес числом от 30 до 350 кг.")
         return
     await state.update_data(target_weight_kg=value)
@@ -249,8 +251,8 @@ async def enter_protein(message: Message, state: FSMContext) -> None:
         message,
         state,
         field="daily_protein_target_g",
-        minimum=Decimal("0"),
-        maximum=Decimal("500"),
+        minimum=Decimal(0),
+        maximum=Decimal(500),
         next_state=ProfileSetup.fat,
         next_prompt="Норма жиров в граммах в день? Введите число или пропустите:",
     )
@@ -262,8 +264,8 @@ async def enter_fat(message: Message, state: FSMContext) -> None:
         message,
         state,
         field="daily_fat_target_g",
-        minimum=Decimal("0"),
-        maximum=Decimal("500"),
+        minimum=Decimal(0),
+        maximum=Decimal(500),
         next_state=ProfileSetup.carbs,
         next_prompt="Норма углеводов в граммах в день? Введите число или пропустите:",
     )
@@ -275,8 +277,8 @@ async def enter_carbs(message: Message, state: FSMContext) -> None:
         message,
         state,
         field="daily_carbs_target_g",
-        minimum=Decimal("0"),
-        maximum=Decimal("1000"),
+        minimum=Decimal(0),
+        maximum=Decimal(1000),
         next_state=ProfileSetup.water,
         next_prompt="Цель воды в мл в день? Введите число или пропустите:",
     )
@@ -292,9 +294,7 @@ async def enter_water(
     else:
         value = parse_integer(raw)
         if value is None or not 250 <= value <= 10000:
-            await message.answer(
-                "Введите целое число от 250 до 10000 мл или нажмите «Пропустить»."
-            )
+            await message.answer("Введите целое число от 250 до 10000 мл или нажмите «Пропустить».")
             return
     await state.update_data(daily_water_target_ml=value)
     data = await state.get_data()
@@ -326,23 +326,6 @@ async def enter_water(
         "Нормы БЖУ и воды сохранены только если вы их указали.",
         reply_markup=main_menu(),
     )
-
-
-def parse_decimal(raw: str | None) -> Decimal | None:
-    """Parse a finite decimal number allowing comma as decimal separator."""
-    try:
-        value = Decimal((raw or "").strip().replace(",", "."))
-    except InvalidOperation:
-        return None
-    return value if value.is_finite() else None
-
-
-def parse_integer(raw: str | None) -> int | None:
-    """Parse an integer value from user input."""
-    try:
-        return int((raw or "").strip())
-    except ValueError:
-        return None
 
 
 def format_target(value: Decimal | int | None) -> str:

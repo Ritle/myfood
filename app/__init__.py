@@ -1,2 +1,1 @@
 """MyFood Telegram bot application."""
-
