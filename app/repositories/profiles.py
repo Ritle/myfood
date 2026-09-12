@@ -25,6 +25,5 @@ async def save_profile(
     for field, value in profile.items():
         setattr(user, field, value)
     user.profile_completed_at = datetime.now(UTC)
-    await session.commit()
-    await session.refresh(user)
+    await session.flush()
     return user

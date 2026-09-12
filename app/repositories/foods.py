@@ -1,4 +1,4 @@
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food
@@ -18,6 +18,7 @@ async def find_foods(
     user_id: int,
     normalized_query: str,
     limit: int = 10,
+    offset: int = 0,
 ) -> list[Food]:
     """Find visible, active foods by normalized name or brand."""
     visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
@@ -32,9 +33,32 @@ async def find_foods(
             ),
         )
         .order_by(Food.is_public.desc(), Food.name)
+        .offset(offset)
         .limit(limit)
     )
     return list(result)
+
+
+async def count_foods(
+    session: AsyncSession, *, user_id: int, normalized_query: str
+) -> int:
+    """Count visible, active products matching a normalized query."""
+    visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
+    return int(
+        await session.scalar(
+            select(func.count())
+            .select_from(Food)
+            .where(
+                Food.is_archived.is_(False),
+                visibility,
+                or_(
+                    Food.name_normalized.contains(normalized_query, autoescape=True),
+                    Food.brand_normalized.contains(normalized_query, autoescape=True),
+                ),
+            )
+        )
+        or 0
+    )
 
 
 async def get_visible_food(session: AsyncSession, *, food_id: int, user_id: int) -> Food | None:

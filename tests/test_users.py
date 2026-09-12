@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models import Base, User
+from app.models import Base, NotificationSettings, User
 from app.repositories.users import get_or_create_user
 
 
@@ -25,10 +25,16 @@ async def test_get_or_create_user_updates_telegram_profile_without_duplicates() 
             count = await session.scalar(
                 select(func.count()).select_from(User).where(User.telegram_id == 123)
             )
+            settings_count = await session.scalar(
+                select(func.count())
+                .select_from(NotificationSettings)
+                .where(NotificationSettings.user_id == first_id)
+            )
 
         assert second.id == first_id
         assert second.username == "new_name"
         assert second.first_name == "Alexandra"
         assert count == 1
+        assert settings_count == 1
     finally:
         await engine.dispose()

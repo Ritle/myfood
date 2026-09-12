@@ -20,6 +20,7 @@ def profile_actions() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="✏️ Изменить параметры")],
+            [KeyboardButton(text="⚖️ Вес")],
             [KeyboardButton(text="🍽 Питание"), KeyboardButton(text="💧 Вода")],
             [KeyboardButton(text="📊 Сегодня"), KeyboardButton(text="📅 История")],
             [KeyboardButton(text="⚙️ Настройки")],

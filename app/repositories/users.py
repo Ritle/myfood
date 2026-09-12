@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.models import NotificationSettings, User
 
 
 async def get_or_create_user(
@@ -16,6 +16,8 @@ async def get_or_create_user(
     if user is None:
         user = User(telegram_id=telegram_id, username=username, first_name=first_name)
         session.add(user)
+        await session.flush()
+        session.add(NotificationSettings(user_id=user.id))
     else:
         user.username = username
         user.first_name = first_name

@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class FoodSearch(StatesGroup):
     query = State()
+    results = State()
 
 
 class FoodCreation(StatesGroup):
