@@ -29,8 +29,14 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
+        notification_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(notification_settings)"
+            ).fetchall()
+        }
 
-    assert revision == ("0011_create_meal_templates",)
+    assert revision == ("0012_add_movement_reminders",)
     assert {
         "users",
         "foods",
@@ -43,3 +49,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "meal_templates",
         "meal_template_items",
     } <= tables
+    assert {
+        "movement_reminders_enabled",
+        "movement_interval_minutes",
+    } <= notification_columns

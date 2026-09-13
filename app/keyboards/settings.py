@@ -49,6 +49,18 @@ def notification_settings_keyboard(
             ],
             [
                 InlineKeyboardButton(
+                    text=f"Разминка: {status(settings.movement_reminders_enabled)}",
+                    callback_data="settings:toggle:movement",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"Интервал разминки: {settings.movement_interval_minutes} мин",
+                    callback_data="settings:edit:movement_interval",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=f"Утренний отчёт: {status(settings.morning_report_enabled)}",
                     callback_data="settings:toggle:report",
                 ),

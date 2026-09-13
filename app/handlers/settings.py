@@ -15,6 +15,7 @@ from app.services.notification_settings import (
     parse_clock,
     parse_time_range,
     parse_timezone,
+    set_movement_interval,
     set_notification_time,
     set_time_range,
     set_user_timezone,
@@ -31,6 +32,7 @@ EDIT_PROMPTS = {
     "dinner": "Введите время напоминания об ужине в формате ЧЧ:ММ:",
     "report": "Введите время утреннего отчёта в формате ЧЧ:ММ:",
     "water_interval": "Введите интервал напоминаний о воде от 30 до 720 минут:",
+    "movement_interval": "Введите интервал напоминаний о разминке от 30 до 240 минут:",
     "water_window": "Введите активные часы воды, например 09:00-21:00:",
     "quiet": "Введите тихие часы, например 22:00-08:00:",
     "timezone": "Введите часовой пояс IANA, например Europe/Moscow:",
@@ -62,7 +64,7 @@ async def toggle_setting(
 ) -> None:
     """Toggle a known notification group."""
     name = (callback.data or "").rsplit(":", 1)[-1]
-    if name not in {"meals", "water", "report"}:
+    if name not in {"meals", "water", "report", "movement"}:
         await callback.answer("Неизвестная настройка", show_alert=True)
         return
     async with session_factory() as session:
@@ -118,6 +120,14 @@ async def save_setting_edit(
                 await message.answer("Введите целое число минут от 30 до 720.")
                 return
             settings = await set_water_interval(
+                session, settings=settings, minutes=minutes
+            )
+        elif name == "movement_interval":
+            minutes = parse_integer(message.text)
+            if minutes is None or not 30 <= minutes <= 240:
+                await message.answer("Введите целое число минут от 30 до 240.")
+                return
+            settings = await set_movement_interval(
                 session, settings=settings, minutes=minutes
             )
         elif name in {"water_window", "quiet"}:
@@ -180,6 +190,8 @@ def format_notification_settings(user: User, settings: NotificationSettings) -> 
         f"{settings.water_interval_minutes} мин\n"
         f"  Активные часы {clock(settings.water_start_time)}–"
         f"{clock(settings.water_end_time)}\n"
+        f"Разминка: {enabled(settings.movement_reminders_enabled)}, каждые "
+        f"{settings.movement_interval_minutes} мин\n"
         f"Утренний отчёт: {enabled(settings.morning_report_enabled)}, "
         f"{clock(settings.morning_report_time)}\n"
         f"Тихие часы: {clock(settings.quiet_start_time)}–"

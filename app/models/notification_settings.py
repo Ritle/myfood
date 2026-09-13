@@ -25,6 +25,10 @@ class NotificationSettings(Base):
             "water_interval_minutes >= 30 AND water_interval_minutes <= 720",
             name="valid_water_interval",
         ),
+        CheckConstraint(
+            "movement_interval_minutes >= 30 AND movement_interval_minutes <= 240",
+            name="valid_movement_interval",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -48,6 +52,12 @@ class NotificationSettings(Base):
     )
     water_end_time: Mapped[time] = mapped_column(
         Time, default=time(21), server_default="21:00:00"
+    )
+    movement_reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    movement_interval_minutes: Mapped[int] = mapped_column(
+        Integer, default=60, server_default="60"
     )
     morning_report_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()

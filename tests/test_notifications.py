@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.models import Base, NotificationLog, NotificationSettings, User
 from app.services.notifications import (
     is_quiet_time,
+    latest_movement_slot,
     latest_water_slot,
     plan_user_notifications,
     run_notification_cycle,
@@ -41,6 +42,14 @@ def test_quiet_hours_and_water_slots() -> None:
     )
     assert slot is not None
     assert slot.time() == time(15)
+
+
+def test_movement_slots_follow_configured_local_interval() -> None:
+    local_now = datetime(2026, 9, 12, 13, 35, tzinfo=ZoneInfo("Europe/Moscow"))
+
+    assert latest_movement_slot(local_now, interval_minutes=60).time() == time(13)
+    assert latest_movement_slot(local_now, interval_minutes=90).time() == time(13, 30)
+    assert latest_movement_slot(local_now, interval_minutes=0) is None
 
 
 @pytest.mark.asyncio
@@ -127,6 +136,59 @@ async def test_cycle_delivers_pending_meal_once() -> None:
         assert "Завтрак" in bot.messages[0][1]
         assert len(logs) == 1
         assert logs[0].status == "sent"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_movement_reminder_obeys_quiet_hours_and_interval_deduplication() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(telegram_id=78, first_name="User", timezone="Europe/Moscow")
+            session.add(user)
+            await session.flush()
+            session.add(
+                NotificationSettings(
+                    user_id=user.id,
+                    meal_reminders_enabled=False,
+                    water_reminders_enabled=False,
+                    movement_reminders_enabled=True,
+                    movement_interval_minutes=60,
+                    morning_report_enabled=False,
+                    quiet_start_time=time(22),
+                    quiet_end_time=time(8),
+                )
+            )
+            await session.commit()
+
+        bot = FakeBot()
+        quiet_time = datetime(2026, 9, 12, 4, 30, tzinfo=UTC)  # 07:30 in Moscow
+        await run_notification_cycle(bot, sessions, now=quiet_time)
+        async with sessions() as session:
+            assert list(await session.scalars(select(NotificationLog))) == []
+
+        now = datetime(2026, 9, 12, 6, 5, tzinfo=UTC)  # 09:05 in Moscow
+        await run_notification_cycle(bot, sessions, now=now)
+        await run_notification_cycle(bot, sessions, now=now)
+        next_interval = datetime(2026, 9, 12, 7, 5, tzinfo=UTC)  # 10:05 in Moscow
+        await run_notification_cycle(bot, sessions, now=next_interval)
+        await run_notification_cycle(bot, sessions, now=next_interval)
+        async with sessions() as session:
+            logs = list(await session.scalars(select(NotificationLog)))
+
+        assert len(bot.messages) == 2
+        assert "Пора размяться" in bot.messages[0][1]
+        assert len(logs) == 2
+        assert all(log.notification_type == "movement" for log in logs)
+        assert all(log.status == "sent" for log in logs)
+        assert [log.scheduled_for.replace(tzinfo=UTC) for log in logs] == [
+            datetime(2026, 9, 12, 6, 0, tzinfo=UTC),
+            datetime(2026, 9, 12, 7, 0, tzinfo=UTC),
+        ]
     finally:
         await engine.dispose()
 

@@ -118,6 +118,7 @@ async def list_due_notifications(
                     "meal_snooze:lunch",
                     "meal_snooze:dinner",
                     "water",
+                    "movement",
                     "morning_report",
                 ]
             ),

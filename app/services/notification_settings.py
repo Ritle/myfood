@@ -19,6 +19,7 @@ TOGGLE_FIELDS = {
     "meals": "meal_reminders_enabled",
     "water": "water_reminders_enabled",
     "report": "morning_report_enabled",
+    "movement": "movement_reminders_enabled",
 }
 
 
@@ -96,6 +97,16 @@ async def set_water_interval(
     if not 30 <= minutes <= 720:
         raise ValueError("water interval must be from 30 to 720 minutes")
     settings.water_interval_minutes = minutes
+    return await save_notification_settings(session, settings)
+
+
+async def set_movement_interval(
+    session: AsyncSession, *, settings: NotificationSettings, minutes: int
+) -> NotificationSettings:
+    """Change the movement reminder interval between 30 minutes and 4 hours."""
+    if not 30 <= minutes <= 240:
+        raise ValueError("movement interval must be from 30 to 240 minutes")
+    settings.movement_interval_minutes = minutes
     return await save_notification_settings(session, settings)
 
 

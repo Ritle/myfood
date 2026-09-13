@@ -53,6 +53,17 @@ def latest_water_slot(
     return window_start + timedelta(minutes=(elapsed_minutes // interval_minutes) * interval_minutes)
 
 
+def latest_movement_slot(
+    local_now: datetime, *, interval_minutes: int
+) -> datetime | None:
+    """Return the latest daily movement slot at a fixed local interval."""
+    if interval_minutes <= 0:
+        return None
+    day_start = datetime.combine(local_now.date(), time.min, tzinfo=local_now.tzinfo)
+    elapsed_minutes = int((local_now - day_start).total_seconds() // 60)
+    return day_start + timedelta(minutes=(elapsed_minutes // interval_minutes) * interval_minutes)
+
+
 def event_is_due(
     local_now: datetime, *, scheduled_time: time, grace: timedelta
 ) -> datetime | None:
@@ -126,6 +137,22 @@ async def plan_user_notifications(
                     ),
                     scheduled_for=slot.astimezone(UTC),
                 )
+
+    if settings.movement_reminders_enabled:
+        slot = latest_movement_slot(
+            local_now, interval_minutes=settings.movement_interval_minutes
+        )
+        if slot is not None:
+            await try_create_notification(
+                session,
+                user_id=user.id,
+                notification_type="movement",
+                local_date=local_day,
+                deduplication_key=(
+                    f"movement:{user.id}:{local_day.isoformat()}:{slot:%H%M}"
+                ),
+                scheduled_for=slot.astimezone(UTC),
+            )
 
     if settings.morning_report_enabled:
         scheduled_local = event_is_due(
@@ -252,6 +279,14 @@ async def build_notification(
             f" из {user.daily_water_target_ml} мл" if user.daily_water_target_ml else ""
         )
         return f"💧 Пора выпить воды. Сегодня записано {consumed} мл{target}.", None
+    if log.notification_type == "movement":
+        if not settings.movement_reminders_enabled:
+            return None, None
+        text = (
+            "🧍 Пора размяться! Встаньте, потянитесь и немного пройдитесь, "
+            "если сейчас удобно."
+        )
+        return text, None
     if log.notification_type == "morning_report":
         if not settings.morning_report_enabled:
             return None, None
