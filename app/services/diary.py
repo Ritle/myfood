@@ -89,6 +89,25 @@ def local_today(timezone_name: str, *, now: datetime | None = None) -> date:
     return current.astimezone(zone).date()
 
 
+def suggest_meal_type(timezone_name: str, *, now: datetime | None = None) -> str:
+    """Suggest a meal from local time: breakfast 05–11, lunch 11–16, dinner 16–22."""
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError):
+        zone = ZoneInfo("Europe/Moscow")
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    hour = current.astimezone(zone).hour
+    if 5 <= hour < 11:
+        return "breakfast"
+    if 11 <= hour < 16:
+        return "lunch"
+    if 16 <= hour < 22:
+        return "dinner"
+    return "snack"
+
+
 async def add_diary_entry(
     session: AsyncSession,
     *,

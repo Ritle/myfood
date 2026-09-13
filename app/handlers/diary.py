@@ -32,6 +32,7 @@ from app.services.diary import (
     local_today,
     remove_diary_entry,
     resize_diary_entry,
+    suggest_meal_type,
     summarize_entries,
 )
 from app.services.foods import (
@@ -48,14 +49,46 @@ from app.utils.portions import parse_portion_input
 
 router = Router()
 MEAL_BUTTONS = {label: meal_type for meal_type, label in MEAL_LABELS.items()}
+DIARY_NAVIGATION_TEXTS = {
+    "📋 Дневник за сегодня",
+    "📚 Каталог продуктов",
+    "↩️ Главное меню",
+}
+
+
+def is_diary_search_text(text: str | None) -> bool:
+    """Keep commands and keyboard navigation out of the product search handler."""
+    return bool(
+        text
+        and not text.startswith("/")
+        and text not in MEAL_BUTTONS
+        and text not in DIARY_NAVIGATION_TEXTS
+    )
 
 
 @router.message(Command("food"))
 @router.message(F.text == "🍽 Питание")
-async def open_diary(message: Message, state: FSMContext) -> None:
-    """Open the food diary and meal selection."""
+async def open_diary(
+    message: Message, state: FSMContext, session_factory: async_sessionmaker
+) -> None:
+    """Open the diary with a meal suggested from the user's local time."""
     await state.clear()
-    await message.answer("Выберите прием пищи:", reply_markup=diary_menu())
+    if message.from_user is None:
+        return
+    async with session_factory() as session:
+        user = await ensure_user(session, message.from_user)
+    meal_type = suggest_meal_type(user.timezone)
+    await state.set_state(DiaryAdd.query)
+    await state.update_data(meal_type=meal_type)
+    await message.answer(
+        f"Предлагаю записать в «{MEAL_LABELS[meal_type]}». Введите продукт или бренд; "
+        "при необходимости смените прием пищи кнопкой ниже.",
+        reply_markup=diary_menu(),
+    )
+    await message.answer(
+        "Можно также выбрать продукт из готового списка:",
+        reply_markup=diary_source_actions(meal_type),
+    )
 
 
 @router.message(F.text.in_(MEAL_BUTTONS))
@@ -65,8 +98,9 @@ async def choose_meal(message: Message, state: FSMContext) -> None:
     await state.set_state(DiaryAdd.query)
     await state.update_data(meal_type=meal_type)
     await message.answer(
-        f"{MEAL_LABELS[meal_type]}: введите название продукта или бренд.",
-        reply_markup=ReplyKeyboardRemove(),
+        f"Выбрано «{MEAL_LABELS[meal_type]}». Введите продукт или бренд; "
+        "при необходимости смените прием пищи кнопкой ниже.",
+        reply_markup=diary_menu(),
     )
     await message.answer(
         "Можно также выбрать продукт из готового списка:",
@@ -74,7 +108,7 @@ async def choose_meal(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(DiaryAdd.query)
+@router.message(DiaryAdd.query, F.text.func(is_diary_search_text))
 async def search_product_for_diary(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:

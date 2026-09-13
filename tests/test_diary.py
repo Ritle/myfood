@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.handlers.diary import is_diary_search_text
 from app.keyboards.diary import diary_portion_keyboard
 from app.models import Base, Food, User
 from app.services.diary import (
@@ -12,6 +13,7 @@ from app.services.diary import (
     get_entries_for_day,
     remove_diary_entry,
     resize_diary_entry,
+    suggest_meal_type,
     summarize_entries,
     utc_day_bounds,
 )
@@ -65,6 +67,30 @@ def test_utc_day_bounds_use_user_timezone() -> None:
 
     assert start == datetime(2026, 9, 11, 21, tzinfo=UTC)
     assert end == datetime(2026, 9, 12, 21, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (datetime(2026, 9, 12, 1, 59, tzinfo=UTC), "snack"),
+        (datetime(2026, 9, 12, 2, 0, tzinfo=UTC), "breakfast"),
+        (datetime(2026, 9, 12, 7, 59, tzinfo=UTC), "breakfast"),
+        (datetime(2026, 9, 12, 8, 0, tzinfo=UTC), "lunch"),
+        (datetime(2026, 9, 12, 13, 0, tzinfo=UTC), "dinner"),
+        (datetime(2026, 9, 12, 19, 0, tzinfo=UTC), "snack"),
+    ],
+)
+def test_suggests_meal_type_from_local_time(now: datetime, expected: str) -> None:
+    assert suggest_meal_type("Europe/Moscow", now=now) == expected
+
+
+def test_diary_search_leaves_meal_and_navigation_buttons_for_their_handlers() -> None:
+    assert is_diary_search_text("банан")
+    assert not is_diary_search_text("🍳 Завтрак")
+    assert not is_diary_search_text("📋 Дневник за сегодня")
+    assert not is_diary_search_text("📚 Каталог продуктов")
+    assert not is_diary_search_text("↩️ Главное меню")
+    assert not is_diary_search_text("/today")
 
 
 @pytest.mark.asyncio
