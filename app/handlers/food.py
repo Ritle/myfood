@@ -51,14 +51,17 @@ def food_card_text(food) -> str:
     source_name = {
         "USDA_FDC": "USDA FoodData Central Foundation Foods",
         "USDA_FNDDS": "USDA FoodData Central Survey Foods",
-        "HEALTH_DIET": "пользовательский экспорт Health Diet",
     }.get(food.source or "", "пользовательский каталог")
     fdc_suffix = (
         f", FDC {food.source_ref}"
         if food.source in {"USDA_FDC", "USDA_FNDDS"} and food.source_ref
         else ""
     )
-    source = f"\nИсточник: {source_name}{fdc_suffix}" if food.source_ref else ""
+    source = (
+        f"\nИсточник: {source_name}{fdc_suffix}"
+        if food.source_ref and food.source != "HEALTH_DIET"
+        else ""
+    )
     section = "\nРаздел: блюда" if food.catalog_section == "dish" else ""
     return (
         f"{food.name}{brand}\n\nНа 100 г:\n"
