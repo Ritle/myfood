@@ -7,7 +7,7 @@ from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
 from app.data.health_diet import load_health_diet_foods
 from app.handlers.food import answer_food_card
 from app.keyboards.diary import diary_recent_food_results
-from app.keyboards.food import food_card_actions
+from app.keyboards.food import food_card_actions, food_results
 from app.models import Base, Food, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
@@ -123,6 +123,8 @@ async def test_private_food_is_visible_only_to_owner() -> None:
             assert dish in owner_dish_page.items
             assert dish in await search_foods(session, user_id=owner.id, query="лазанья")
             assert dish not in stranger_dish_page.items
+            food_button = food_results([food]).inline_keyboard[0][0]
+            assert food_button.text == "Творог домашний · 121 ккал\nБ 17.2 · Ж 5 · У 1.8"
     finally:
         await engine.dispose()
 

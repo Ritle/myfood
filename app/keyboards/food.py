@@ -6,6 +6,22 @@ from aiogram.types import (
 )
 
 from app.models import Food
+from app.utils.formatting import format_decimal
+
+_MAX_RESULT_NAME_LENGTH = 28
+
+
+def food_result_label(food: Food) -> str:
+    """Show a compact per-100-gram nutrition summary within Telegram's button limit."""
+    name = food.name
+    if len(name) > _MAX_RESULT_NAME_LENGTH:
+        name = f"{name[:_MAX_RESULT_NAME_LENGTH - 1]}…"
+    return (
+        f"{name} · {format_decimal(food.calories_per_100g)} ккал\n"
+        f"Б {format_decimal(food.protein_per_100g)} · "
+        f"Ж {format_decimal(food.fat_per_100g)} · "
+        f"У {format_decimal(food.carbs_per_100g)}"
+    )
 
 
 def food_menu() -> ReplyKeyboardMarkup:
@@ -36,7 +52,7 @@ def food_results(
 ) -> InlineKeyboardMarkup:
     """Build buttons that open product cards."""
     rows = [
-        [InlineKeyboardButton(text=food.name, callback_data=f"food:view:{food.id}")]
+        [InlineKeyboardButton(text=food_result_label(food), callback_data=f"food:view:{food.id}")]
         for food in foods
     ]
     if page is not None and total_pages is not None and total_pages > 1:
@@ -59,7 +75,7 @@ def food_results(
 def dish_results(foods: list[Food], *, page: int, total_pages: int) -> InlineKeyboardMarkup:
     """Build a paginated list from the dedicated dish catalog."""
     rows = [
-        [InlineKeyboardButton(text=food.name, callback_data=f"food:view:{food.id}")]
+        [InlineKeyboardButton(text=food_result_label(food), callback_data=f"food:view:{food.id}")]
         for food in foods
     ]
     if total_pages > 1:

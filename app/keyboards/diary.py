@@ -5,6 +5,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from app.keyboards.food import food_result_label
 from app.models import Food, FoodEntry, MealTemplate
 from app.services.diary import MEAL_LABELS
 from app.services.foods import RecentFoodPortion
@@ -72,7 +73,7 @@ def diary_food_results(foods: list[Food], meal_type: str) -> InlineKeyboardMarku
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=food.name,
+                    text=food_result_label(food),
                     callback_data=f"diary:add:{meal_type}:{food.id}",
                 )
             ]
@@ -171,7 +172,7 @@ def diary_food_page(
     rows = [
         [
             InlineKeyboardButton(
-                text=food.name, callback_data=f"diary:add:{meal_type}:{food.id}"
+                text=food_result_label(food), callback_data=f"diary:add:{meal_type}:{food.id}"
             )
         ]
         for food in foods
