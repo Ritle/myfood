@@ -5,14 +5,18 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data import BASE_FOODS
-from app.models import Food
+from app.models import Food, FoodEntry
 from app.repositories.favorite_foods import (
     add_favorite,
     is_favorite,
     list_favorite_foods,
     remove_favorite,
 )
-from app.repositories.food_entries import list_recent_foods
+from app.repositories.food_entries import (
+    get_latest_food_entry,
+    list_recent_food_entries,
+    list_recent_foods,
+)
 from app.repositories.foods import (
     count_foods,
     create_food,
@@ -29,6 +33,15 @@ class FoodSearchPage:
     items: list[Food]
     page: int
     total_pages: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecentFoodPortion:
+    """A recently used product and the diary entry containing its latest portion."""
+
+    entry_id: int
+    food: Food
+    weight_grams: Decimal
 
 
 def normalize_food_text(value: str) -> str:
@@ -160,6 +173,28 @@ async def recent_foods(
 ) -> list[Food]:
     """Load unique products from recent diary entries."""
     return await list_recent_foods(session, user_id=user_id, limit=limit)
+
+
+async def recent_food_portions(
+    session: AsyncSession, *, user_id: int, limit: int = 10
+) -> list[RecentFoodPortion]:
+    """Load recent products with the weight from each product's latest diary entry."""
+    entries = await list_recent_food_entries(session, user_id=user_id, limit=limit)
+    return [
+        RecentFoodPortion(
+            entry_id=entry.id,
+            food=entry.food,
+            weight_grams=entry.weight_grams,
+        )
+        for entry in entries
+    ]
+
+
+async def latest_food_portion_entry(
+    session: AsyncSession, *, user_id: int, food_id: int
+) -> FoodEntry | None:
+    """Load the latest portion entry for a user's product."""
+    return await get_latest_food_entry(session, user_id=user_id, food_id=food_id)
 
 
 async def seed_base_foods(session: AsyncSession) -> tuple[int, int]:

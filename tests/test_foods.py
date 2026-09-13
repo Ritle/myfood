@@ -4,12 +4,15 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
+from app.keyboards.diary import diary_recent_food_results
 from app.models import Base, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
     add_user_food,
     favorite_foods,
+    latest_food_portion_entry,
     load_food,
+    recent_food_portions,
     recent_foods,
     search_foods,
     search_foods_page,
@@ -135,7 +138,7 @@ async def test_catalog_pagination_favorites_and_recent_foods() -> None:
                 meal_type="breakfast",
                 weight_grams=Decimal(100),
             )
-            await add_diary_entry(
+            last_entry = await add_diary_entry(
                 session,
                 user_id=owner.id,
                 food=foods[1],
@@ -145,5 +148,22 @@ async def test_catalog_pagination_favorites_and_recent_foods() -> None:
             assert [food.id for food in await recent_foods(session, user_id=owner.id)] == [
                 foods[1].id
             ]
+            recent_portions = await recent_food_portions(session, user_id=owner.id)
+            assert len(recent_portions) == 1
+            assert recent_portions[0].food.id == foods[1].id
+            assert recent_portions[0].entry_id == last_entry.id
+            assert recent_portions[0].weight_grams == Decimal(50)
+            assert (
+                await latest_food_portion_entry(
+                    session, user_id=owner.id, food_id=foods[1].id
+                )
+            ).id == last_entry.id
+            recent_keyboard = diary_recent_food_results(recent_portions, "lunch")
+            buttons = [button for row in recent_keyboard.inline_keyboard for button in row]
+            assert any(button.text == "↻ 50 г" for button in buttons)
+            assert any(
+                button.callback_data == f"diary:repeat:lunch:{last_entry.id}"
+                for button in buttons
+            )
     finally:
         await engine.dispose()

@@ -7,6 +7,8 @@ from aiogram.types import (
 
 from app.models import Food, FoodEntry
 from app.services.diary import MEAL_LABELS
+from app.services.foods import RecentFoodPortion
+from app.utils.formatting import format_decimal
 from app.utils.portions import QUICK_PORTIONS
 
 
@@ -57,6 +59,27 @@ def diary_food_results(foods: list[Food], meal_type: str) -> InlineKeyboardMarku
                 )
             ]
             for food in foods
+        ]
+    )
+
+
+def diary_recent_food_results(
+    items: list[RecentFoodPortion], meal_type: str
+) -> InlineKeyboardMarkup:
+    """Offer weight editing and one-tap repeat for each recently used product."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{item.food.name[:32]} · изменить",
+                    callback_data=f"diary:add:{meal_type}:{item.food.id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"↻ {format_decimal(item.weight_grams)} г",
+                    callback_data=f"diary:repeat:{meal_type}:{item.entry_id}",
+                ),
+            ]
+            for item in items
         ]
     )
 

@@ -43,6 +43,18 @@ async def get_owned_food_entry(
     )
 
 
+async def get_latest_food_entry(
+    session: AsyncSession, *, user_id: int, food_id: int
+) -> FoodEntry | None:
+    """Load the latest diary entry for one product owned by a user."""
+    return await session.scalar(
+        select(FoodEntry)
+        .where(FoodEntry.user_id == user_id, FoodEntry.food_id == food_id)
+        .order_by(FoodEntry.eaten_at.desc(), FoodEntry.id.desc())
+        .limit(1)
+    )
+
+
 async def save_food_entry(session: AsyncSession, entry: FoodEntry) -> FoodEntry:
     """Commit changes to an existing diary entry."""
     await session.commit()
@@ -77,3 +89,26 @@ async def list_recent_foods(
         if len(unique) == limit:
             break
     return unique
+
+
+async def list_recent_food_entries(
+    session: AsyncSession, *, user_id: int, limit: int = 10
+) -> list[FoodEntry]:
+    """Return each recently used active food with its latest diary entry."""
+    result = await session.scalars(
+        select(FoodEntry)
+        .join(Food, FoodEntry.food_id == Food.id)
+        .where(FoodEntry.user_id == user_id, Food.is_archived.is_(False))
+        .order_by(FoodEntry.eaten_at.desc(), FoodEntry.id.desc())
+        .limit(max(limit * 10, limit))
+    )
+    recent: list[FoodEntry] = []
+    seen: set[int] = set()
+    for entry in result.unique():
+        if entry.food_id in seen:
+            continue
+        seen.add(entry.food_id)
+        recent.append(entry)
+        if len(recent) == limit:
+            break
+    return recent

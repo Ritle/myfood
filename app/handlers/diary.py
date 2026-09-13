@@ -2,6 +2,7 @@ from collections import defaultdict
 from decimal import Decimal
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
@@ -16,6 +17,7 @@ from app.keyboards.diary import (
     diary_food_results,
     diary_menu,
     diary_portion_keyboard,
+    diary_recent_food_results,
     diary_source_actions,
 )
 from app.models import FoodEntry, User
@@ -34,8 +36,9 @@ from app.services.diary import (
 )
 from app.services.foods import (
     favorite_foods,
+    latest_food_portion_entry,
     load_food,
-    recent_foods,
+    recent_food_portions,
     search_foods_page,
 )
 from app.states.diary import DiaryAdd, DiaryEdit
@@ -151,15 +154,26 @@ async def show_diary_food_source(
         return
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
+        recent_items = (
+            await recent_food_portions(session, user_id=user.id)
+            if source == "recent"
+            else []
+        )
         foods = (
-            await recent_foods(session, user_id=user.id)
+            []
             if source == "recent"
             else await favorite_foods(session, user_id=user.id)
         )
     await state.set_state(DiaryAdd.query)
     await state.update_data(meal_type=meal_type)
     if callback.message is not None:
-        if foods:
+        if source == "recent" and recent_items:
+            await callback.message.answer(
+                "Нажмите «изменить», чтобы задать вес заново, или ↻, "
+                "чтобы повторить прошлую порцию:",
+                reply_markup=diary_recent_food_results(recent_items[:10], meal_type),
+            )
+        elif foods:
             await callback.message.answer(
                 "Выберите продукт:",
                 reply_markup=diary_food_results(foods[:10], meal_type),
@@ -168,6 +182,84 @@ async def show_diary_food_source(
             label = "Недавних продуктов" if source == "recent" else "Избранных продуктов"
             await callback.message.answer(f"{label} пока нет. Введите название для поиска.")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diary:repeat:"))
+async def repeat_recent_food_portion(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    settings: Settings,
+) -> None:
+    """Repeat an owned recent diary entry with the same food and portion weight."""
+    if not isinstance(callback.message, Message):
+        await callback.answer("Не удалось открыть дневник. Попробуйте снова.", show_alert=True)
+        return
+    try:
+        _, _, meal_type, raw_entry_id = (callback.data or "").split(":", 3)
+        entry_id = int(raw_entry_id)
+    except ValueError:
+        await callback.answer("Некорректный выбор", show_alert=True)
+        return
+    if meal_type not in MEAL_LABELS:
+        await callback.answer("Некорректный прием пищи", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        previous_entry = await load_owned_entry(
+            session, user_id=user.id, entry_id=entry_id
+        )
+        if previous_entry is None or previous_entry.food.is_archived:
+            await callback.answer(
+                "Последняя порция больше недоступна. Откройте список недавних снова.",
+                show_alert=True,
+            )
+            return
+        latest_entry = await latest_food_portion_entry(
+            session, user_id=user.id, food_id=previous_entry.food_id
+        )
+        if latest_entry is None or latest_entry.id != previous_entry.id:
+            await callback.answer(
+                "Список недавних устарел. Откройте его снова.", show_alert=True
+            )
+            return
+        previous_entries = await today_entries(session, user)
+        previous_total = summarize_entries(previous_entries).calories
+        entry = await add_diary_entry(
+            session,
+            user_id=user.id,
+            food=previous_entry.food,
+            meal_type=meal_type,
+            weight_grams=previous_entry.weight_grams,
+        )
+        entries = await today_entries(session, user)
+        alert = await claim_alert_for_change(
+            session,
+            user=user,
+            previous_total=previous_total,
+            current_total=summarize_entries(entries).calories,
+            settings=settings,
+        )
+        recent_items = await recent_food_portions(session, user_id=user.id)
+
+    await state.clear()
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=diary_recent_food_results(recent_items, meal_type)
+        )
+    except TelegramAPIError:
+        pass
+    await callback.message.answer(
+        f"Повторно добавлено: {previous_entry.food.name}, "
+        f"{format_decimal(entry.weight_grams)} г\n"
+        f"{format_decimal(entry.calories)} ккал · "
+        f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
+        f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}",
+        reply_markup=diary_menu(),
+    )
+    await callback.answer("Добавлено")
+    await deliver_calorie_alert(callback.message, alert, settings, session_factory)
 
 
 @router.callback_query(F.data == "diary:noop")
