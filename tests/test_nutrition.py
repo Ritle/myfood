@@ -3,7 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.nutrition import age_on, calculate_daily_calorie_target
+from app.services.nutrition import (
+    age_on,
+    calculate_daily_calorie_target,
+    calculate_daily_macronutrient_targets,
+)
 
 
 def test_calculates_male_maintenance_target() -> None:
@@ -36,6 +40,15 @@ def test_calculates_female_weight_loss_target() -> None:
 
 def test_age_does_not_advance_before_birthday() -> None:
     assert age_on(date(2000, 10, 1), date(2026, 9, 30)) == 25
+
+
+def test_calculates_macro_targets_from_calorie_target() -> None:
+    assert calculate_daily_macronutrient_targets(2000) == (125, 67, 225)
+
+
+def test_macro_calculator_rejects_non_positive_calories() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        calculate_daily_macronutrient_targets(0)
 
 
 def test_calculator_rejects_minors() -> None:

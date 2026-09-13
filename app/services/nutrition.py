@@ -51,3 +51,22 @@ def calculate_daily_calorie_target(
     bmr = Decimal(10) * weight_kg + Decimal("6.25") * height_cm - Decimal(5) * age + constant
     target = bmr * ACTIVITY_FACTORS[activity_level] * GOAL_FACTORS[goal]
     return int(target.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+def calculate_daily_macronutrient_targets(calories: int) -> tuple[int, int, int]:
+    """Suggest protein, fat, and carbohydrate grams from a calorie target.
+
+    The starting split is 25% of energy from protein, 30% from fat, and 45%
+    from carbohydrates. This transparent baseline is editable by the user.
+    """
+    if calories <= 0:
+        raise ValueError("calories must be positive")
+
+    energy = Decimal(calories)
+    protein = energy * Decimal("0.25") / Decimal(4)
+    fat = energy * Decimal("0.30") / Decimal(9)
+    carbohydrates = energy * Decimal("0.45") / Decimal(4)
+    return tuple(
+        int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+        for value in (protein, fat, carbohydrates)
+    )

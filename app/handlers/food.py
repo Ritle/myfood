@@ -180,7 +180,11 @@ async def show_food_card(callback: CallbackQuery, session_factory: async_session
         await callback.answer("Продукт недоступен", show_alert=True)
         return
     brand = f"\nБренд: {food.brand}" if food.brand else ""
-    source = f"\nИсточник: USDA FoodData Central, FDC {food.source_ref}" if food.source_ref else ""
+    source_name = {
+        "USDA_FDC": "USDA FoodData Central Foundation Foods",
+        "USDA_FNDDS": "USDA FoodData Central Survey Foods",
+    }.get(food.source or "", "USDA FoodData Central")
+    source = f"\nИсточник: {source_name}, FDC {food.source_ref}" if food.source_ref else ""
     if callback.message is not None:
         await callback.message.answer(
             f"{food.name}{brand}\n\nНа 100 г:\n"

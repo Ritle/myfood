@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.data.base_foods import BASE_FOODS
+from app.data import BASE_FOODS
 from app.models import Food
 from app.repositories.favorite_foods import (
     add_favorite,
@@ -168,9 +168,11 @@ async def seed_base_foods(session: AsyncSession) -> tuple[int, int]:
     updated = 0
     for item in BASE_FOODS:
         source_ref = str(item.fdc_id)
-        product = await get_food_by_source(session, source="USDA_FDC", source_ref=source_ref)
+        product = await get_food_by_source(
+            session, source=item.source, source_ref=source_ref
+        )
         if product is None:
-            product = Food(source="USDA_FDC", source_ref=source_ref)
+            product = Food(source=item.source, source_ref=source_ref)
             session.add(product)
             created += 1
         else:

@@ -10,9 +10,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.keyboards.main_menu import main_menu
 from app.keyboards.profile import choices, profile_actions, skip_choice
 from app.repositories.users import get_or_create_user
-from app.services.nutrition import age_on, calculate_daily_calorie_target
+from app.services.nutrition import (
+    age_on,
+    calculate_daily_calorie_target,
+    calculate_daily_macronutrient_targets,
+)
 from app.services.profiles import get_profile, persist_profile
 from app.states.profile import ProfileSetup
+from app.utils.dates import parse_birth_date
 from app.utils.numbers import parse_decimal, parse_integer
 
 router = Router()
@@ -25,6 +30,13 @@ ACTIVITY_LABELS = {
     "Очень высокая": "very_high",
 }
 GOAL_LABELS = {"Похудение": "lose", "Поддержание веса": "maintain", "Набор веса": "gain"}
+KEEP_CALCULATED = "Оставить расчет"
+
+MACRO_STEPS = {
+    "daily_protein_target_g": (ProfileSetup.protein, "белка", Decimal(0), Decimal(500)),
+    "daily_fat_target_g": (ProfileSetup.fat, "жиров", Decimal(0), Decimal(500)),
+    "daily_carbs_target_g": (ProfileSetup.carbs, "углеводов", Decimal(0), Decimal(1000)),
+}
 
 
 async def begin_profile(message: Message, state: FSMContext) -> None:
@@ -94,20 +106,21 @@ async def choose_gender(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(gender=value)
     await state.set_state(ProfileSetup.birth_date)
-    await message.answer("Введите дату рождения в формате ГГГГ-ММ-ДД:")
+    await message.answer(
+        "Введите дату рождения, например 25.04.1990. "
+        "Также подойдут 25/04/1990, 25-04-1990 или 1990-04-25."
+    )
 
 
 @router.message(ProfileSetup.birth_date)
 async def enter_birth_date(message: Message, state: FSMContext) -> None:
-    try:
-        birth_date = date.fromisoformat((message.text or "").strip())
-        today = datetime.now(UTC).date()
-        age = age_on(birth_date, today)
-        if birth_date >= today or age < 18 or age > 100:
-            raise ValueError
-    except ValueError:
+    birth_date = parse_birth_date(message.text)
+    today = datetime.now(UTC).date()
+    if birth_date is None or birth_date >= today or not 18 <= age_on(birth_date, today) <= 100:
         await message.answer(
-            "Введите дату рождения взрослого пользователя (18–100 лет) в формате ГГГГ-ММ-ДД."
+            "Введите действительную дату рождения взрослого пользователя (18–100 лет), "
+            "например 25.04.1990. Поддерживаются ДД.ММ.ГГГГ, ДД/ММ/ГГГГ, "
+            "ДД-ММ-ГГГГ и ГГГГ-ММ-ДД."
         )
         return
     await state.update_data(birth_date=birth_date.isoformat())
@@ -181,107 +194,139 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
         activity_level=data["activity_level"],
         goal=value,
     )
-    await state.update_data(goal=value, suggested_calories=target)
-    await state.set_state(ProfileSetup.calorie_choice)
+    protein, fat, carbs = calculate_daily_macronutrient_targets(target)
+    await state.update_data(
+        goal=value,
+        suggested_calories=target,
+        suggested_daily_protein_target_g=protein,
+        suggested_daily_fat_target_g=fat,
+        suggested_daily_carbs_target_g=carbs,
+    )
+    await state.set_state(ProfileSetup.nutrition_choice)
     await message.answer(
-        f"Расчетная дневная норма: {target} ккал. Использовать ее?",
-        reply_markup=choices("Использовать расчет", "Указать вручную"),
+        f"Расчетные нормы на день:\n"
+        f"Калории: {target} ккал\n"
+        f"Белки: {protein} г\n"
+        f"Жиры: {fat} г\n"
+        f"Углеводы: {carbs} г\n\n"
+        "Можно оставить расчет или скорректировать значения. "
+        "Расчет КБЖУ использует распределение энергии 25% / 30% / 45% "
+        "и служит ориентиром.",
+        reply_markup=choices(KEEP_CALCULATED, "Скорректировать"),
     )
 
 
-@router.message(ProfileSetup.calorie_choice)
-async def choose_calories(message: Message, state: FSMContext) -> None:
-    if message.text == "Использовать расчет":
+@router.message(ProfileSetup.nutrition_choice)
+async def choose_nutrition_targets(message: Message, state: FSMContext) -> None:
+    if message.text == KEEP_CALCULATED:
         data = await state.get_data()
-        await state.update_data(daily_calorie_target=data["suggested_calories"])
-        await ask_protein(message, state)
-    elif message.text == "Указать вручную":
-        await state.set_state(ProfileSetup.manual_calories)
-        await message.answer("Введите дневную норму калорий (800–10000):", reply_markup=None)
+        await state.update_data(
+            daily_calorie_target=data["suggested_calories"],
+            daily_protein_target_g=Decimal(data["suggested_daily_protein_target_g"]),
+            daily_fat_target_g=Decimal(data["suggested_daily_fat_target_g"]),
+            daily_carbs_target_g=Decimal(data["suggested_daily_carbs_target_g"]),
+        )
+        await ask_water(message, state)
+    elif message.text == "Скорректировать":
+        await ask_calories(message, state)
     else:
-        await message.answer("Нажмите «Использовать расчет» или «Указать вручную».")
+        await message.answer(f"Нажмите «{KEEP_CALCULATED}» или «Скорректировать».")
+
+
+async def ask_calories(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.set_state(ProfileSetup.manual_calories)
+    await message.answer(
+        f"Расчетная норма: {data['suggested_calories']} ккал. "
+        f"Введите новое значение или нажмите «{KEEP_CALCULATED}».",
+        reply_markup=choices(KEEP_CALCULATED),
+    )
 
 
 @router.message(ProfileSetup.manual_calories)
 async def enter_calories(message: Message, state: FSMContext) -> None:
-    value = parse_integer(message.text)
-    if value is None or not 800 <= value <= 10000:
-        await message.answer("Введите целое число от 800 до 10000 ккал.")
-        return
-    await state.update_data(daily_calorie_target=value)
-    await ask_protein(message, state)
+    if (message.text or "").strip() == KEEP_CALCULATED:
+        data = await state.get_data()
+        value = data["suggested_calories"]
+    else:
+        value = parse_integer(message.text)
+        if value is None or not 800 <= value <= 10000:
+            await message.answer("Введите целое число от 800 до 10000 ккал или оставьте расчет.")
+            return
+    protein, fat, carbs = calculate_daily_macronutrient_targets(value)
+    await state.update_data(
+        daily_calorie_target=value,
+        suggested_daily_protein_target_g=protein,
+        suggested_daily_fat_target_g=fat,
+        suggested_daily_carbs_target_g=carbs,
+    )
+    await ask_macro(message, state, "daily_protein_target_g")
 
 
-async def ask_protein(message: Message, state: FSMContext) -> None:
-    await state.set_state(ProfileSetup.protein)
+async def ask_macro(message: Message, state: FSMContext, field: str) -> None:
+    next_state, label, _, _ = MACRO_STEPS[field]
+    data = await state.get_data()
+    suggestion = data[f"suggested_{field}"]
+    await state.set_state(next_state)
     await message.answer(
-        "Норма белка в граммах в день? Введите число или нажмите «Пропустить»:",
+        f"Расчетная норма {label}: {suggestion} г в день. "
+        f"Введите другое значение или нажмите «{KEEP_CALCULATED}».",
+        reply_markup=choices(KEEP_CALCULATED),
+    )
+
+
+async def ask_water(message: Message, state: FSMContext) -> None:
+    await state.set_state(ProfileSetup.water)
+    await message.answer(
+        "Цель воды в мл в день? Введите число или нажмите «Пропустить»:",
         reply_markup=skip_choice(),
     )
 
 
-async def read_optional_target(
+async def read_macro_target(
     message: Message,
     state: FSMContext,
     *,
     field: str,
-    minimum: Decimal,
-    maximum: Decimal,
-    next_state: type,
-    next_prompt: str,
+    next_field: str | None,
 ) -> None:
     raw = (message.text or "").strip()
-    if raw == "Пропустить":
-        await state.update_data(**{field: None})
+    _, label, minimum, maximum = MACRO_STEPS[field]
+    if raw == KEEP_CALCULATED:
+        data = await state.get_data()
+        value = Decimal(data[f"suggested_{field}"])
     else:
         value = parse_decimal(raw)
         if value is None or not minimum <= value <= maximum:
             await message.answer(
-                f"Введите число от {minimum} до {maximum} или нажмите «Пропустить»."
+                f"Введите норму {label} числом от {minimum} до {maximum} г "
+                f"или нажмите «{KEEP_CALCULATED}»."
             )
             return
-        await state.update_data(**{field: value})
-    await state.set_state(next_state)
-    await message.answer(next_prompt, reply_markup=skip_choice())
+    await state.update_data(**{field: value})
+    if next_field is None:
+        await ask_water(message, state)
+    else:
+        await ask_macro(message, state, next_field)
 
 
 @router.message(ProfileSetup.protein)
 async def enter_protein(message: Message, state: FSMContext) -> None:
-    await read_optional_target(
-        message,
-        state,
-        field="daily_protein_target_g",
-        minimum=Decimal(0),
-        maximum=Decimal(500),
-        next_state=ProfileSetup.fat,
-        next_prompt="Норма жиров в граммах в день? Введите число или пропустите:",
+    await read_macro_target(
+        message, state, field="daily_protein_target_g", next_field="daily_fat_target_g"
     )
 
 
 @router.message(ProfileSetup.fat)
 async def enter_fat(message: Message, state: FSMContext) -> None:
-    await read_optional_target(
-        message,
-        state,
-        field="daily_fat_target_g",
-        minimum=Decimal(0),
-        maximum=Decimal(500),
-        next_state=ProfileSetup.carbs,
-        next_prompt="Норма углеводов в граммах в день? Введите число или пропустите:",
+    await read_macro_target(
+        message, state, field="daily_fat_target_g", next_field="daily_carbs_target_g"
     )
 
 
 @router.message(ProfileSetup.carbs)
 async def enter_carbs(message: Message, state: FSMContext) -> None:
-    await read_optional_target(
-        message,
-        state,
-        field="daily_carbs_target_g",
-        minimum=Decimal(0),
-        maximum=Decimal(1000),
-        next_state=ProfileSetup.water,
-        next_prompt="Цель воды в мл в день? Введите число или пропустите:",
-    )
+    await read_macro_target(message, state, field="daily_carbs_target_g", next_field=None)
 
 
 @router.message(ProfileSetup.water)
@@ -323,7 +368,7 @@ async def enter_water(
     await state.clear()
     await message.answer(
         f"Профиль сохранен. Ваша дневная норма — {profile['daily_calorie_target']} ккал.\n"
-        "Нормы БЖУ и воды сохранены только если вы их указали.",
+        "Расчетные нормы БЖУ сохранены; цель воды — только если вы ее указали.",
         reply_markup=main_menu(),
     )
 

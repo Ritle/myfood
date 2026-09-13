@@ -12,6 +12,7 @@ class BaseFood:
     protein: Decimal
     fat: Decimal
     carbs: Decimal
+    source: str = "USDA_FDC"
 
 
 def food(
@@ -21,6 +22,8 @@ def food(
     protein: str,
     fat: str,
     carbs: str,
+    *,
+    source: str = "USDA_FDC",
 ) -> BaseFood:
     """Create an exact decimal reference item from compact source literals."""
     return BaseFood(
@@ -30,6 +33,7 @@ def food(
         protein=Decimal(protein),
         fat=Decimal(fat),
         carbs=Decimal(carbs),
+        source=source,
     )
 
 

@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.data.base_foods import BASE_FOODS
+from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
 from app.models import Base, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
@@ -34,10 +34,15 @@ async def test_seed_is_idempotent_and_catalog_is_searchable() -> None:
             assert await seed_base_foods(session) == (len(BASE_FOODS), 0)
             assert await seed_base_foods(session) == (0, len(BASE_FOODS))
             results = await search_foods(session, user_id=owner.id, query="куриная")
+            grain_results = await search_foods(session, user_id=owner.id, query="гречневая")
             wildcard_results = await search_foods(session, user_id=owner.id, query="рис%")
 
-        assert {food.source_ref for food in results} == {"2646170", "331960"}
+        assert {food.source_ref for food in results} >= {"2646170", "331960"}
         assert all(food.brand is None for food in results)
+        assert any(food.source == "USDA_FNDDS" for food in grain_results)
+        assert len(FOUNDATION_FOODS) == 25
+        assert len(FNDDS_FOODS) == 134
+        assert all(food.source == "USDA_FNDDS" for food in FNDDS_FOODS)
         assert wildcard_results == []
     finally:
         await engine.dispose()
