@@ -7,6 +7,7 @@ from aiogram.types import (
 
 from app.models import Food, FoodEntry
 from app.services.diary import MEAL_LABELS
+from app.utils.portions import QUICK_PORTIONS
 
 
 def diary_menu() -> ReplyKeyboardMarkup:
@@ -26,6 +27,22 @@ def diary_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="↩️ Главное меню")],
         ],
         resize_keyboard=True,
+    )
+
+
+def diary_portion_keyboard() -> ReplyKeyboardMarkup:
+    """Offer common approximate portions while keeping free-form gram input."""
+    labels = [label for label, _ in QUICK_PORTIONS]
+    rows = [
+        [KeyboardButton(text=labels[index]), KeyboardButton(text=labels[index + 1])]
+        for index in range(0, len(labels) - 1, 2)
+    ]
+    if len(labels) % 2:
+        rows.append([KeyboardButton(text=labels[-1])])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        input_field_placeholder="Выберите порцию или введите граммы",
     )
 
 

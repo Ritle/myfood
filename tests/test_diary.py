@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.keyboards.diary import diary_portion_keyboard
 from app.models import Base, Food, User
 from app.services.diary import (
     add_diary_entry,
@@ -15,6 +16,7 @@ from app.services.diary import (
     utc_day_bounds,
 )
 from app.services.foods import normalize_food_text
+from app.utils.portions import parse_portion_input
 
 
 def sample_food() -> Food:
@@ -36,6 +38,26 @@ def test_calculates_portion_with_consistent_rounding() -> None:
     assert portion.protein == Decimal("28.80")
     assert portion.fat == Decimal("9.00")
     assert portion.carbs == Decimal("5.40")
+
+
+def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
+    assert parse_portion_input("🥛 1 стакан ≈200 г") == Decimal(200)
+    assert parse_portion_input("полстакана") == Decimal(100)
+    assert parse_portion_input("2 ст. л.") == Decimal(30)
+    assert parse_portion_input("1 чайная ложка") == Decimal(5)
+    assert parse_portion_input("1 столовую ложку") == Decimal(15)
+    assert parse_portion_input("2 чайных ложки") == Decimal(10)
+    assert parse_portion_input("2,5 стакана") == Decimal(500)
+    assert parse_portion_input("125,5") == Decimal("125.5")
+    assert parse_portion_input("большая тарелка") is None
+
+    button_labels = {
+        button.text
+        for row in diary_portion_keyboard().keyboard
+        for button in row
+    }
+    assert "🥄 1 чайная ложка ≈5 г" in button_labels
+    assert "🥄 1 столовая ложка ≈15 г" in button_labels
 
 
 def test_utc_day_bounds_use_user_timezone() -> None:

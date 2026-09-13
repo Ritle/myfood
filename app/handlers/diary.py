@@ -15,6 +15,7 @@ from app.keyboards.diary import (
     diary_food_page,
     diary_food_results,
     diary_menu,
+    diary_portion_keyboard,
     diary_source_actions,
 )
 from app.models import FoodEntry, User
@@ -40,6 +41,7 @@ from app.services.foods import (
 from app.states.diary import DiaryAdd, DiaryEdit
 from app.utils.formatting import format_decimal
 from app.utils.numbers import parse_decimal
+from app.utils.portions import parse_portion_input
 
 router = Router()
 MEAL_BUTTONS = {label: meal_type for meal_type, label in MEAL_LABELS.items()}
@@ -196,7 +198,11 @@ async def select_diary_food(
     await state.set_state(DiaryAdd.weight)
     await state.update_data(food_id=food_id, meal_type=meal_type)
     if callback.message is not None:
-        await callback.message.answer(f"Сколько граммов «{food.name}» вы съели?")
+        await callback.message.answer(
+            f"Выберите порцию для «{food.name}» или введите точный вес в граммах.\n"
+            "Меры приблизительные: вес зависит от продукта.",
+            reply_markup=diary_portion_keyboard(),
+        )
     await callback.answer()
 
 
@@ -208,9 +214,11 @@ async def enter_portion_weight(
     settings: Settings,
 ) -> None:
     """Calculate and save a selected product portion."""
-    weight = parse_decimal(message.text)
+    weight = parse_portion_input(message.text)
     if weight is None or not Decimal("0.01") <= weight <= Decimal(10000):
-        await message.answer("Введите вес порции от 0,01 до 10000 г.")
+        await message.answer(
+            "Выберите меру на клавиатуре или введите вес от 0,01 до 10000 г."
+        )
         return
     if message.from_user is None:
         return
