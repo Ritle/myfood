@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
 from app.keyboards.diary import diary_recent_food_results
+from app.keyboards.food import food_card_actions
 from app.models import Base, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
@@ -18,6 +19,7 @@ from app.services.foods import (
     search_foods_page,
     seed_base_foods,
     toggle_food_favorite,
+    update_user_food,
 )
 
 
@@ -80,6 +82,109 @@ async def test_private_food_is_visible_only_to_owner() -> None:
             assert await load_food(session, user_id=stranger.id, food_id=food.id) is None
             assert len(await search_foods(session, user_id=owner.id, query="ТВОРОГ")) == 1
             assert await search_foods(session, user_id=stranger.id, query="творог") == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_owner_can_edit_private_food_without_changing_diary_snapshots() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=1, first_name="Owner")
+            stranger = User(telegram_id=2, first_name="Stranger")
+            session.add_all([owner, stranger])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(stranger)
+            food = await add_user_food(
+                session,
+                user_id=owner.id,
+                name="Йогурт натуральный",
+                brand=None,
+                calories=Decimal(80),
+                protein=Decimal(4),
+                fat=Decimal(3),
+                carbs=Decimal(8),
+            )
+            entry = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="breakfast",
+                weight_grams=Decimal(100),
+            )
+
+            renamed = await update_user_food(
+                session,
+                user_id=owner.id,
+                food_id=food.id,
+                field="name",
+                value="  Йогурт   греческий ",
+            )
+            assert renamed is not None and renamed.name == "Йогурт греческий"
+            branded = await update_user_food(
+                session,
+                user_id=owner.id,
+                food_id=food.id,
+                field="brand",
+                value="Домашний",
+            )
+            assert branded is not None and branded.brand == "Домашний"
+            updated = await update_user_food(
+                session,
+                user_id=owner.id,
+                food_id=food.id,
+                field="calories",
+                value=Decimal("95.5"),
+            )
+            assert updated is not None and updated.calories_per_100g == Decimal("95.50")
+            cleared_brand = await update_user_food(
+                session,
+                user_id=owner.id,
+                food_id=food.id,
+                field="brand",
+                value=None,
+            )
+            assert cleared_brand is not None and cleared_brand.brand is None
+            unauthorized = await update_user_food(
+                session,
+                user_id=stranger.id,
+                food_id=food.id,
+                field="calories",
+                value=Decimal(1),
+            )
+
+            assert unauthorized is None
+            assert entry.calories == Decimal("80.00")
+            assert await search_foods(session, user_id=owner.id, query="греческий") == [food]
+            assert await search_foods(session, user_id=stranger.id, query="греческий") == []
+            with pytest.raises(ValueError):
+                await update_user_food(
+                    session,
+                    user_id=owner.id,
+                    food_id=food.id,
+                    field="protein",
+                    value=Decimal(101),
+                )
+            current = await load_food(session, user_id=owner.id, food_id=food.id)
+            assert current is not None and current.calories_per_100g == Decimal("95.50")
+
+        private_actions = food_card_actions(1, favorite=False, editable=True)
+        public_actions = food_card_actions(1, favorite=False)
+        assert any(
+            button.callback_data == "food:edit:1"
+            for row in private_actions.inline_keyboard
+            for button in row
+        )
+        assert all(
+            button.callback_data != "food:edit:1"
+            for row in public_actions.inline_keyboard
+            for button in row
+        )
     finally:
         await engine.dispose()
 

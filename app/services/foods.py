@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from app.repositories.foods import (
     create_food,
     find_foods,
     get_food_by_source,
+    get_owned_food,
     get_visible_food,
 )
 
@@ -42,6 +44,9 @@ class RecentFoodPortion:
     entry_id: int
     food: Food
     weight_grams: Decimal
+
+
+FoodEditableField = Literal["name", "brand", "calories", "protein", "fat", "carbs"]
 
 
 def normalize_food_text(value: str) -> str:
@@ -138,6 +143,52 @@ async def search_foods_page(
 async def load_food(session: AsyncSession, *, user_id: int, food_id: int) -> Food | None:
     """Load a visible catalog product."""
     return await get_visible_food(session, food_id=food_id, user_id=user_id)
+
+
+async def update_user_food(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    food_id: int,
+    field: FoodEditableField,
+    value: str | Decimal | None,
+) -> Food | None:
+    """Update one field of an active private product owned by the user."""
+    food = await get_owned_food(session, food_id=food_id, user_id=user_id)
+    if food is None:
+        return None
+
+    if field == "name":
+        if not isinstance(value, str):
+            raise ValueError("Название должно быть текстом")
+        food.name = validate_food_name(value)
+        food.name_normalized = normalize_food_text(food.name)
+    elif field == "brand":
+        if value is not None and not isinstance(value, str):
+            raise ValueError("Бренд должен быть текстом")
+        food.brand = (
+            validate_food_name(value, field="Бренд", maximum_length=120)
+            if value
+            else None
+        )
+        food.brand_normalized = normalize_food_text(food.brand) if food.brand else None
+    elif field in {"calories", "protein", "fat", "carbs"}:
+        if not isinstance(value, Decimal):
+            raise ValueError("Пищевая ценность должна быть числом")
+        nutrient = validate_nutrient(value, calories=field == "calories")
+        attribute = {
+            "calories": "calories_per_100g",
+            "protein": "protein_per_100g",
+            "fat": "fat_per_100g",
+            "carbs": "carbs_per_100g",
+        }[field]
+        setattr(food, attribute, nutrient)
+    else:
+        raise ValueError("Неизвестное поле продукта")
+
+    await session.commit()
+    await session.refresh(food)
+    return food
 
 
 async def toggle_food_favorite(

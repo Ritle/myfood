@@ -13,3 +13,7 @@ class FoodCreation(StatesGroup):
     protein = State()
     fat = State()
     carbs = State()
+
+
+class FoodEdit(StatesGroup):
+    value = State()

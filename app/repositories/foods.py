@@ -72,6 +72,18 @@ async def get_visible_food(session: AsyncSession, *, food_id: int, user_id: int)
     )
 
 
+async def get_owned_food(session: AsyncSession, *, food_id: int, user_id: int) -> Food | None:
+    """Return an active private product only when it is owned by the requesting user."""
+    return await session.scalar(
+        select(Food).where(
+            Food.id == food_id,
+            Food.created_by_user_id == user_id,
+            Food.is_public.is_(False),
+            Food.is_archived.is_(False),
+        )
+    )
+
+
 async def get_food_by_source(session: AsyncSession, *, source: str, source_ref: str) -> Food | None:
     """Find an imported product by its stable external identity."""
     return await session.scalar(

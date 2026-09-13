@@ -55,15 +55,47 @@ def food_results(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def food_card_actions(food_id: int, *, favorite: bool) -> InlineKeyboardMarkup:
-    """Build bookmark controls for a product card."""
+def food_card_actions(
+    food_id: int, *, favorite: bool, editable: bool = False
+) -> InlineKeyboardMarkup:
+    """Build bookmark controls and, for private products, an edit action."""
     label = "★ Убрать из избранного" if favorite else "☆ В избранное"
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"food:favorite:{food_id}")]]
+    if editable:
+        rows.append(
+            [InlineKeyboardButton(text="✏️ Изменить продукт", callback_data=f"food:edit:{food_id}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def food_edit_fields(food_id: int) -> InlineKeyboardMarkup:
+    """Build field selectors for editing one product attribute at a time."""
+    labels = [
+        ("Название", "name"),
+        ("Бренд", "brand"),
+        ("Калории", "calories"),
+        ("Белки", "protein"),
+        ("Жиры", "fat"),
+        ("Углеводы", "carbs"),
+    ]
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=label, callback_data=f"food:editfield:{food_id}:{field}"
+            )
+        ]
+        for label, field in labels
+    ]
+    rows.append(
+        [InlineKeyboardButton(text="Назад", callback_data=f"food:view:{food_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def food_edit_cancel(food_id: int) -> InlineKeyboardMarkup:
+    """Build a cancellation button for a pending product field edit."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=label, callback_data=f"food:favorite:{food_id}"
-                )
-            ]
+            [InlineKeyboardButton(text="Отмена", callback_data=f"food:editcancel:{food_id}")]
         ]
     )
