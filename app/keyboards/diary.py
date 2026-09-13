@@ -5,7 +5,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from app.models import Food, FoodEntry
+from app.models import Food, FoodEntry, MealTemplate
 from app.services.diary import MEAL_LABELS
 from app.services.foods import RecentFoodPortion
 from app.utils.formatting import format_decimal
@@ -103,7 +103,7 @@ def diary_recent_food_results(
 
 
 def diary_source_actions(meal_type: str) -> InlineKeyboardMarkup:
-    """Offer recent and favorite products alongside text search."""
+    """Offer recent, favorite, and reusable meal sources alongside text search."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -114,6 +114,50 @@ def diary_source_actions(meal_type: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="⭐ Избранные",
                     callback_data=f"diary:source:favorites:{meal_type}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🍱 Мои шаблоны",
+                    callback_data=f"diary:source:templates:{meal_type}",
+                )
+            ],
+        ]
+    )
+
+
+def diary_meal_templates(
+    templates: list[MealTemplate], *, meal_type: str
+) -> InlineKeyboardMarkup:
+    """Build apply and delete controls for the user's saved meal templates."""
+    rows = []
+    for template in templates:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🍽 {template.name[:28]} · {len(template.items)} поз.",
+                    callback_data=f"diary:template:use:{meal_type}:{template.id}",
+                ),
+                InlineKeyboardButton(
+                    text="🗑",
+                    callback_data=f"diary:template:delete:{template.id}",
+                ),
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def meal_template_delete_confirmation(template_id: int) -> InlineKeyboardMarkup:
+    """Require confirmation before deleting a saved meal template."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Удалить шаблон",
+                    callback_data=f"diary:template:delete_yes:{template_id}",
+                ),
+                InlineKeyboardButton(
+                    text="Отмена", callback_data="diary:template:delete_no"
                 ),
             ]
         ]

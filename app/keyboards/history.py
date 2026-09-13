@@ -79,7 +79,11 @@ def history_keyboard(
                         callback_data=(
                             f"history:repeat_meal:{day.isoformat()}:{meal_type}"
                         ),
-                    )
+                    ),
+                    InlineKeyboardButton(
+                        text="💾 Шаблон",
+                        callback_data=f"history:save_meal:{day.isoformat()}:{meal_type}",
+                    ),
                 ]
             )
     return InlineKeyboardMarkup(inline_keyboard=rows)

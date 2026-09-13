@@ -16,10 +16,12 @@ from app.keyboards.diary import (
     diary_entry_actions,
     diary_food_page,
     diary_food_results,
+    diary_meal_templates,
     diary_menu,
     diary_portion_keyboard,
     diary_recent_food_results,
     diary_source_actions,
+    meal_template_delete_confirmation,
 )
 from app.models import Food, FoodEntry, User
 from app.repositories.notifications import mark_notification_sent
@@ -46,6 +48,12 @@ from app.services.foods import (
     recent_food_portions,
     search_foods,
     search_foods_page,
+)
+from app.services.meal_templates import (
+    MAX_MEAL_TEMPLATE_ITEMS,
+    delete_owned_meal_template,
+    list_user_meal_templates,
+    load_owned_meal_template,
 )
 from app.states.diary import DiaryAdd, DiaryEdit
 from app.utils.food_batches import (
@@ -211,27 +219,50 @@ async def prepare_food_batch(
         )
         return
 
+    preview_items = [
+        (item.query, food, item.weight_grams, item.assumed_weight)
+        for item, food in resolved
+    ]
+    await prepare_batch_confirmation(
+        message,
+        state,
+        meal_type=meal_type,
+        preview_items=preview_items,
+        title=f"Проверьте список для «{MEAL_LABELS[meal_type]}»:",
+    )
+
+
+async def prepare_batch_confirmation(
+    message: Message,
+    state: FSMContext,
+    *,
+    meal_type: str,
+    preview_items: list[tuple[str, Food, Decimal, bool]],
+    title: str,
+) -> None:
+    """Calculate a reusable multi-item preview and await user confirmation."""
     state_items = []
-    lines = [f"Проверьте список для «{MEAL_LABELS[meal_type]}»:"]
+    lines = [title]
     totals = {"calories": Decimal(0), "protein": Decimal(0), "fat": Decimal(0), "carbs": Decimal(0)}
     has_assumed_weights = False
-    for item, food in resolved:
-        portion = calculate_portion(food, item.weight_grams)
+    for label, food, weight, assumed_weight in preview_items:
+        portion = calculate_portion(food, weight)
         totals["calories"] += portion.calories
         totals["protein"] += portion.protein
         totals["fat"] += portion.fat
         totals["carbs"] += portion.carbs
-        assumed_note = " (вес принят за 100 г)" if item.assumed_weight else ""
-        has_assumed_weights = has_assumed_weights or item.assumed_weight
+        assumed_note = " (вес принят за 100 г)" if assumed_weight else ""
+        has_assumed_weights = has_assumed_weights or assumed_weight
+        product_label = f"{label} → {food.name}" if label != food.name else food.name
         lines.append(
-            f"• {item.query} → {food.name} — {format_decimal(item.weight_grams)} г"
+            f"• {product_label} — {format_decimal(weight)} г"
             f"{assumed_note} · {format_decimal(portion.calories)} ккал"
         )
         state_items.append(
             {
                 "food_id": food.id,
-                "weight_grams": str(item.weight_grams),
-                "assumed_weight": item.assumed_weight,
+                "weight_grams": str(weight),
+                "assumed_weight": assumed_weight,
             }
         )
     if has_assumed_weights:
@@ -403,7 +434,7 @@ async def show_diary_food_source(
     except ValueError:
         await callback.answer("Некорректный список", show_alert=True)
         return
-    if source not in {"recent", "favorites"} or meal_type not in MEAL_LABELS:
+    if source not in {"recent", "favorites", "templates"} or meal_type not in MEAL_LABELS:
         await callback.answer("Некорректный список", show_alert=True)
         return
     async with session_factory() as session:
@@ -416,7 +447,13 @@ async def show_diary_food_source(
         foods = (
             []
             if source == "recent"
+            or source == "templates"
             else await favorite_foods(session, user_id=user.id)
+        )
+        templates = (
+            await list_user_meal_templates(session, user_id=user.id)
+            if source == "templates"
+            else []
         )
     await state.set_state(DiaryAdd.query)
     await state.update_data(meal_type=meal_type)
@@ -427,15 +464,139 @@ async def show_diary_food_source(
                 "чтобы повторить прошлую порцию:",
                 reply_markup=diary_recent_food_results(recent_items[:10], meal_type),
             )
+        elif source == "templates" and templates:
+            await callback.message.answer(
+                "Выберите шаблон, чтобы проверить и добавить привычное блюдо:",
+                reply_markup=diary_meal_templates(templates, meal_type=meal_type),
+            )
         elif foods:
             await callback.message.answer(
                 "Выберите продукт:",
                 reply_markup=diary_food_results(foods[:10], meal_type),
             )
         else:
-            label = "Недавних продуктов" if source == "recent" else "Избранных продуктов"
-            await callback.message.answer(f"{label} пока нет. Введите название для поиска.")
+            label = {
+                "recent": "Недавних продуктов",
+                "favorites": "Избранных продуктов",
+                "templates": "Шаблонов блюд",
+            }[source]
+            detail = (
+                "Добавьте блюдо в дневник и сохраните его из раздела «История»."
+                if source == "templates"
+                else "Введите название для поиска."
+            )
+            await callback.message.answer(f"{label} пока нет. {detail}")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diary:template:use:"))
+async def use_meal_template(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Preview an owned template in the currently selected diary meal."""
+    if not isinstance(callback.message, Message):
+        await callback.answer("Не удалось открыть дневник. Попробуйте снова.", show_alert=True)
+        return
+    try:
+        _, _, _, meal_type, raw_template_id = (callback.data or "").split(":", 4)
+        template_id = int(raw_template_id)
+    except ValueError:
+        await callback.answer("Некорректный шаблон", show_alert=True)
+        return
+    if meal_type not in MEAL_LABELS or template_id <= 0:
+        await callback.answer("Некорректный шаблон", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        template = await load_owned_meal_template(
+            session, user_id=user.id, template_id=template_id
+        )
+        if template is None or not 1 <= len(template.items) <= MAX_MEAL_TEMPLATE_ITEMS:
+            await callback.answer("Шаблон недоступен или устарел", show_alert=True)
+            return
+        preview_items = []
+        for template_item in template.items:
+            food = await load_food(
+                session, user_id=user.id, food_id=template_item.food_id
+            )
+            if food is None:
+                await callback.answer(
+                    "Один из продуктов больше недоступен. Обновите шаблон.",
+                    show_alert=True,
+                )
+                return
+            preview_items.append(
+                (food.name, food, Decimal(template_item.weight_grams), False)
+            )
+
+    await prepare_batch_confirmation(
+        callback.message,
+        state,
+        meal_type=meal_type,
+        preview_items=preview_items,
+        title=(
+            f"Шаблон «{template.name}» для «{MEAL_LABELS[meal_type]}». "
+            "Проверьте состав и актуальные КБЖУ:"
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diary:template:delete:"))
+async def request_meal_template_deletion(
+    callback: CallbackQuery, session_factory: async_sessionmaker
+) -> None:
+    """Ask before deleting one of the user's saved templates."""
+    try:
+        template_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Некорректный шаблон", show_alert=True)
+        return
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        template = await load_owned_meal_template(
+            session, user_id=user.id, template_id=template_id
+        )
+    if template is None:
+        await callback.answer("Шаблон недоступен", show_alert=True)
+        return
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            f"Удалить шаблон «{template.name}»?",
+            reply_markup=meal_template_delete_confirmation(template.id),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diary:template:delete_yes:"))
+async def confirm_meal_template_deletion(
+    callback: CallbackQuery, session_factory: async_sessionmaker
+) -> None:
+    """Delete an owned meal template after explicit confirmation."""
+    try:
+        template_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Некорректный шаблон", show_alert=True)
+        return
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        deleted = await delete_owned_meal_template(
+            session, user_id=user.id, template_id=template_id
+        )
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            "Шаблон удален." if deleted else "Шаблон уже недоступен."
+        )
+    await callback.answer("Удалено" if deleted else "Недоступно")
+
+
+@router.callback_query(F.data == "diary:template:delete_no")
+async def cancel_meal_template_deletion(callback: CallbackQuery) -> None:
+    """Dismiss the meal template delete prompt."""
+    await callback.answer("Оставил шаблон")
 
 
 @router.callback_query(F.data.startswith("diary:repeat:"))

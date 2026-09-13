@@ -53,7 +53,7 @@ async def cancel_setup(message: Message, state: FSMContext) -> None:
     """Cancel the current questionnaire without persisting partial answers."""
     await state.clear()
     await message.answer(
-        "Настройка отменена. Чтобы начать снова, отправьте /profile.",
+        "Текущий ввод отменен. Чтобы настроить профиль, отправьте /profile.",
         reply_markup=main_menu(),
     )
 

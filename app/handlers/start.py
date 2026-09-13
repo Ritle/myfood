@@ -10,6 +10,25 @@ from app.repositories.profiles import get_user_by_telegram_id
 from app.repositories.users import get_or_create_user
 
 router = Router()
+START_OVERVIEW = (
+    "MyFood — дневник питания и помощник по привычкам. "
+    "Добавляйте продукты быстрым вводом, следите за калориями и КБЖУ, "
+    "учитывайте воду и вес, сохраняйте частые приемы пищи в шаблоны."
+)
+
+
+def start_welcome_text(first_name: str, *, profile_completed: bool) -> str:
+    """Build the welcome message for a new or returning user."""
+    greeting = f"Привет, {first_name}!"
+    if profile_completed:
+        return (
+            f"{greeting}\n\n{START_OVERVIEW}\n\n"
+            "Профиль настроен. Выберите действие в меню ниже."
+        )
+    return (
+        f"{greeting}\n\n{START_OVERVIEW}\n\n"
+        "Чтобы рассчитать личные цели, сначала настроим профиль."
+    )
 
 
 @router.message(CommandStart())
@@ -31,12 +50,11 @@ async def start_handler(
 
     if user is None or user.profile_completed_at is None:
         await message.answer(
-            f"Привет, {message.from_user.first_name}! Давайте настроим ваш профиль."
+            start_welcome_text(message.from_user.first_name, profile_completed=False)
         )
         await begin_profile(message, state)
         return
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Я помогу вести дневник питания и воды.\n"
-        "Ваш профиль уже настроен.",
+        start_welcome_text(message.from_user.first_name, profile_completed=True),
         reply_markup=main_menu(),
     )

@@ -26,11 +26,20 @@ from app.services.diary import (
     local_today,
     summarize_entries,
 )
+from app.services.foods import load_food
 from app.services.history import repeat_food_entry, repeat_meal
+from app.services.meal_templates import (
+    MAX_MEAL_TEMPLATE_ITEMS,
+    MAX_MEAL_TEMPLATES,
+    count_user_meal_templates,
+    create_meal_template,
+    validate_template_name,
+)
 from app.services.today import format_today
 from app.services.water import get_water_for_day, total_water
 from app.states.history import HistorySelect
 from app.utils.formatting import format_decimal
+from app.utils.numbers import parse_decimal
 
 router = Router()
 PAGE_SIZE = 8
@@ -183,6 +192,130 @@ async def request_repeat_meal(
             reply_markup=repeat_meal_confirmation(day, meal_type),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("history:save_meal:"))
+async def request_save_meal_template(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Start saving one past meal as a named reusable template."""
+    parsed = parse_meal_callback(callback.data)
+    if parsed is None or callback.message is None:
+        await callback.answer("Некорректный прием пищи", show_alert=True)
+        return
+    day, meal_type = parsed
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        if await count_user_meal_templates(session, user_id=user.id) >= MAX_MEAL_TEMPLATES:
+            await callback.answer(
+                f"Сохранено максимальное число шаблонов ({MAX_MEAL_TEMPLATES}). "
+                "Удалите ненужный шаблон и попробуйте снова.",
+                show_alert=True,
+            )
+            return
+        entries = await get_entries_for_day(
+            session, user_id=user.id, day=day, timezone_name=user.timezone
+        )
+        meal_entries = [entry for entry in entries if entry.meal_type == meal_type]
+        if not meal_entries:
+            await callback.answer("Прием пищи больше недоступен", show_alert=True)
+            return
+        if len(meal_entries) > MAX_MEAL_TEMPLATE_ITEMS:
+            await callback.answer(
+                f"В шаблоне может быть не больше {MAX_MEAL_TEMPLATE_ITEMS} продуктов.",
+                show_alert=True,
+            )
+            return
+        raw_items = []
+        for entry in meal_entries:
+            food = await load_food(session, user_id=user.id, food_id=entry.food_id)
+            if food is None:
+                await callback.answer(
+                    "Один из продуктов больше недоступен. Шаблон не создан.",
+                    show_alert=True,
+                )
+                return
+            raw_items.append(
+                {"food_id": food.id, "weight_grams": str(entry.weight_grams)}
+            )
+
+    await state.set_state(HistorySelect.template_name)
+    await state.update_data(
+        template_meal_type=meal_type,
+        template_items=raw_items,
+    )
+    await callback.message.answer(
+        f"Введите название шаблона для «{MEAL_LABELS[meal_type]}» "
+        "(от 2 до 50 символов). Отправьте /cancel, чтобы отменить."
+    )
+    await callback.answer()
+
+
+@router.message(HistorySelect.template_name)
+async def save_meal_template(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Validate the requested name and store products from the selected meal."""
+    if message.from_user is None:
+        return
+    try:
+        name, _ = validate_template_name(message.text)
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    data = await state.get_data()
+    meal_type = data.get("template_meal_type")
+    raw_items = data.get("template_items")
+    if (
+        meal_type not in MEAL_LABELS
+        or not isinstance(raw_items, list)
+        or not 1 <= len(raw_items) <= MAX_MEAL_TEMPLATE_ITEMS
+    ):
+        await state.clear()
+        await message.answer("Выбранный прием пищи устарел. Сохраните шаблон из истории заново.")
+        return
+
+    try:
+        async with session_factory() as session:
+            user = await ensure_user(session, message.from_user)
+            items = []
+            for raw_item in raw_items:
+                if not isinstance(raw_item, dict):
+                    await state.clear()
+                    await message.answer(
+                        "Список продуктов устарел. Сохраните прием пищи из истории заново."
+                    )
+                    return
+                food_id = raw_item.get("food_id")
+                weight = parse_decimal(str(raw_item.get("weight_grams", "")))
+                if not isinstance(food_id, int) or weight is None:
+                    raise ValueError("Список продуктов устарел. Попробуйте сохранить прием снова.")
+                food = await load_food(session, user_id=user.id, food_id=food_id)
+                if food is None:
+                    raise ValueError("Один из продуктов больше недоступен. Сохраните прием снова.")
+                items.append((food, weight))
+            template = await create_meal_template(
+                session,
+                user_id=user.id,
+                name=name,
+                meal_type=meal_type,
+                items=items,
+            )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    await state.clear()
+    await message.answer(
+        f"Шаблон «{template.name}» сохранен ({len(items)} продуктов). "
+        "Его можно выбрать в разделе «Питание» → «Мои шаблоны».",
+        reply_markup=main_menu(),
+    )
 
 
 @router.callback_query(F.data.startswith("history:confirm_entry:"))

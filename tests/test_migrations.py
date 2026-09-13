@@ -30,7 +30,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
             ).fetchall()
         }
 
-    assert revision == ("0010_create_favorite_foods",)
+    assert revision == ("0011_create_meal_templates",)
     assert {
         "users",
         "foods",
@@ -40,4 +40,6 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "notification_settings",
         "notification_logs",
         "favorite_foods",
+        "meal_templates",
+        "meal_template_items",
     } <= tables

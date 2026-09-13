@@ -37,6 +37,14 @@ BOT_COMMANDS = [
     BotCommand(command="help", description="Справка"),
     BotCommand(command="cancel", description="Отменить текущий ввод"),
 ]
+BOT_SHORT_DESCRIPTION = (
+    "Дневник питания, КБЖУ, воды и веса. Быстрый ввод и шаблоны привычных блюд."
+)
+BOT_DESCRIPTION = (
+    "MyFood помогает вести дневник питания, воды и веса. Записывайте продукты, "
+    "следите за калориями и КБЖУ, сохраняйте привычные приемы пищи в шаблоны, "
+    "отслеживайте прогресс и получайте напоминания. Цели и расчеты носят справочный характер."
+)
 
 
 def build_dispatcher(session_factory, settings: Settings) -> Dispatcher:
@@ -77,6 +85,8 @@ def build_scheduler(bot: Bot, session_factory, settings: Settings) -> AsyncIOSch
 async def configure_bot(bot: Bot) -> None:
     """Publish the command menu displayed by Telegram clients."""
     await bot.set_my_commands(BOT_COMMANDS)
+    await bot.set_my_short_description(short_description=BOT_SHORT_DESCRIPTION)
+    await bot.set_my_description(description=BOT_DESCRIPTION)
 
 
 async def main() -> None:
