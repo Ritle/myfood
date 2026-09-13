@@ -23,6 +23,21 @@ docker compose logs -f bot
 
 Контейнер перед каждым запуском применяет Alembic-миграции и идемпотентно загружает базовый каталог. SQLite хранится в именованном томе `myfood-data`. Healthcheck проверяет подключение к базе каждые 30 секунд.
 
+### Одноразовый импорт Health Diet
+
+После обновления кода выполните импорт один раз. Команда подключает исходную папку только к временному контейнеру; в образ бота она не попадает.
+
+```bash
+docker compose stop bot
+docker compose run --rm --no-deps \
+  -v "$PWD/health_diet_data:/import/health_diet_data:ro" \
+  -e HEALTH_DIET_DATA_DIRECTORY=/import/health_diet_data \
+  bot python -m app.commands.import_health_diet
+docker compose start bot
+```
+
+В результате команда выведет количество созданных и обновлённых позиций. Повторный запуск безопасен, но не нужен для обычной работы бота.
+
 Остановка с корректным завершением планировщика и polling:
 
 ```bash
