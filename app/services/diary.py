@@ -137,6 +137,43 @@ async def add_diary_entry(
     )
 
 
+async def add_diary_entries(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    items: list[tuple[Food, Decimal]],
+    meal_type: str,
+    eaten_at: datetime | None = None,
+) -> list[FoodEntry]:
+    """Store a confirmed group of products atomically with one shared timestamp."""
+    if meal_type not in MEAL_TYPES:
+        raise ValueError("unknown meal type")
+    if not items:
+        raise ValueError("at least one food is required")
+    timestamp = eaten_at or datetime.now(UTC)
+    entries = []
+    for food, weight_grams in items:
+        portion = calculate_portion(food, weight_grams)
+        entries.append(
+            FoodEntry(
+                user_id=user_id,
+                food_id=food.id,
+                meal_type=meal_type,
+                weight_grams=weight_grams.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
+                calories=portion.calories,
+                protein=portion.protein,
+                fat=portion.fat,
+                carbs=portion.carbs,
+                eaten_at=timestamp,
+            )
+        )
+    session.add_all(entries)
+    await session.commit()
+    for entry in entries:
+        await session.refresh(entry)
+    return entries
+
+
 async def get_entries_for_day(
     session: AsyncSession, *, user_id: int, day: date, timezone_name: str
 ) -> list[FoodEntry]:

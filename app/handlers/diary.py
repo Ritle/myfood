@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.keyboards.diary import (
     delete_confirmation,
+    diary_batch_confirmation,
     diary_entry_actions,
     diary_food_page,
     diary_food_results,
@@ -20,13 +21,15 @@ from app.keyboards.diary import (
     diary_recent_food_results,
     diary_source_actions,
 )
-from app.models import FoodEntry, User
+from app.models import Food, FoodEntry, User
 from app.repositories.notifications import mark_notification_sent
 from app.repositories.users import get_or_create_user
 from app.services.calorie_alerts import CalorieAlert, claim_calorie_alert
 from app.services.diary import (
     MEAL_LABELS,
+    add_diary_entries,
     add_diary_entry,
+    calculate_portion,
     get_entries_for_day,
     load_owned_entry,
     local_today,
@@ -39,10 +42,18 @@ from app.services.foods import (
     favorite_foods,
     latest_food_portion_entry,
     load_food,
+    normalize_food_text,
     recent_food_portions,
+    search_foods,
     search_foods_page,
 )
 from app.states.diary import DiaryAdd, DiaryEdit
+from app.utils.food_batches import (
+    MAX_BATCH_ITEMS,
+    ParsedFoodBatch,
+    ParsedFoodItem,
+    parse_food_batch_input,
+)
 from app.utils.formatting import format_decimal
 from app.utils.numbers import parse_decimal
 from app.utils.portions import parse_portion_input
@@ -113,6 +124,21 @@ async def search_product_for_diary(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
     """Search products for the selected meal."""
+    try:
+        batch = parse_food_batch_input(message.text)
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+    if batch is not None:
+        data = await state.get_data()
+        await prepare_food_batch(
+            message,
+            state,
+            session_factory,
+            batch=batch,
+            default_meal_type=data.get("meal_type"),
+        )
+        return
     if message.from_user is None:
         return
     data = await state.get_data()
@@ -139,6 +165,200 @@ async def search_product_for_diary(
             total_pages=page.total_pages,
         ),
     )
+
+
+async def prepare_food_batch(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    *,
+    batch: ParsedFoodBatch,
+    default_meal_type: str | None,
+) -> None:
+    """Resolve products and display their weights and totals for confirmation."""
+    if message.from_user is None:
+        return
+    meal_type = batch.meal_type or default_meal_type
+    if meal_type not in MEAL_LABELS:
+        await message.answer("Сначала выберите прием пищи.")
+        return
+
+    resolved: list[tuple[ParsedFoodItem, Food]] = []
+    missing: list[str] = []
+    async with session_factory() as session:
+        user = await ensure_user(session, message.from_user)
+        for item in batch.items:
+            matches = await search_foods(
+                session, user_id=user.id, query=item.query, limit=20
+            )
+            if not matches:
+                missing.append(item.query)
+                continue
+            normalized_query = normalize_food_text(item.query)
+            exact = [food for food in matches if food.name_normalized == normalized_query]
+            if not exact:
+                exact = [
+                    food for food in matches if food.brand_normalized == normalized_query
+                ]
+            prefix = [
+                food for food in matches if food.name_normalized.startswith(normalized_query)
+            ]
+            resolved.append((item, (exact or prefix or matches)[0]))
+    if missing:
+        await message.answer(
+            f"Не нашел в каталоге: {', '.join(missing)}. "
+            "Исправьте названия и отправьте список еще раз."
+        )
+        return
+
+    state_items = []
+    lines = [f"Проверьте список для «{MEAL_LABELS[meal_type]}»:"]
+    totals = {"calories": Decimal(0), "protein": Decimal(0), "fat": Decimal(0), "carbs": Decimal(0)}
+    has_assumed_weights = False
+    for item, food in resolved:
+        portion = calculate_portion(food, item.weight_grams)
+        totals["calories"] += portion.calories
+        totals["protein"] += portion.protein
+        totals["fat"] += portion.fat
+        totals["carbs"] += portion.carbs
+        assumed_note = " (вес принят за 100 г)" if item.assumed_weight else ""
+        has_assumed_weights = has_assumed_weights or item.assumed_weight
+        lines.append(
+            f"• {item.query} → {food.name} — {format_decimal(item.weight_grams)} г"
+            f"{assumed_note} · {format_decimal(portion.calories)} ккал"
+        )
+        state_items.append(
+            {
+                "food_id": food.id,
+                "weight_grams": str(item.weight_grams),
+                "assumed_weight": item.assumed_weight,
+            }
+        )
+    if has_assumed_weights:
+        lines.append("Для продуктов без указанного веса использовал 100 г.")
+    lines.append(
+        f"\nИтого: {format_decimal(totals['calories'])} ккал · "
+        f"Б {format_decimal(totals['protein'])} · Ж {format_decimal(totals['fat'])} · "
+        f"У {format_decimal(totals['carbs'])}"
+    )
+    await state.set_state(DiaryAdd.batch_confirm)
+    await state.update_data(meal_type=meal_type, batch_items=state_items)
+    await message.answer("\n".join(lines), reply_markup=diary_batch_confirmation())
+
+
+@router.callback_query(F.data == "diary:batch:cancel")
+async def cancel_food_batch(callback: CallbackQuery, state: FSMContext) -> None:
+    """Cancel a pending multi-food confirmation and return to product input."""
+    if await state.get_state() != DiaryAdd.batch_confirm.state:
+        await callback.answer("Этот список уже закрыт.", show_alert=True)
+        return
+    data = await state.get_data()
+    meal_type = data.get("meal_type")
+    if meal_type not in MEAL_LABELS:
+        await callback.answer("Выберите приём пищи заново.", show_alert=True)
+        return
+    await state.set_state(DiaryAdd.query)
+    await state.update_data(batch_items=None, meal_type=meal_type)
+    if isinstance(callback.message, Message):
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+        await callback.message.answer(
+            "Список отменён. Введите продукты заново.", reply_markup=diary_menu()
+        )
+    await callback.answer("Отменено")
+
+
+@router.callback_query(F.data == "diary:batch:confirm")
+async def confirm_food_batch(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    settings: Settings,
+) -> None:
+    """Atomically add every visible product in a confirmed message batch."""
+    if await state.get_state() != DiaryAdd.batch_confirm.state:
+        await callback.answer("Этот список уже закрыт.", show_alert=True)
+        return
+    if not isinstance(callback.message, Message):
+        await callback.answer("Не удалось открыть дневник. Попробуйте снова.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    meal_type = data.get("meal_type")
+    raw_items = data.get("batch_items")
+    if (
+        meal_type not in MEAL_LABELS
+        or not isinstance(raw_items, list)
+        or not 1 <= len(raw_items) <= MAX_BATCH_ITEMS
+    ):
+        await callback.answer("Список устарел. Введите продукты заново.", show_alert=True)
+        return
+
+    stale = False
+    entries: list[FoodEntry] = []
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        items: list[tuple[Food, Decimal]] = []
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                stale = True
+                break
+            food_id = raw_item.get("food_id")
+            weight = parse_decimal(str(raw_item.get("weight_grams", "")))
+            if (
+                not isinstance(food_id, int)
+                or not 1 <= food_id
+                or weight is None
+                or not Decimal("0.01") <= weight <= Decimal(10000)
+            ):
+                stale = True
+                break
+            food = await load_food(session, user_id=user.id, food_id=food_id)
+            if food is None:
+                stale = True
+                break
+            items.append((food, weight))
+        if not stale:
+            previous_entries = await today_entries(session, user)
+            previous_total = summarize_entries(previous_entries).calories
+            entries = await add_diary_entries(
+                session,
+                user_id=user.id,
+                items=items,
+                meal_type=meal_type,
+            )
+            current_entries = await today_entries(session, user)
+            alert = await claim_alert_for_change(
+                session,
+                user=user,
+                previous_total=previous_total,
+                current_total=summarize_entries(current_entries).calories,
+                settings=settings,
+            )
+
+    if stale:
+        await state.set_state(DiaryAdd.query)
+        await state.update_data(batch_items=None, meal_type=meal_type)
+        await callback.message.answer(
+            "Один из продуктов стал недоступен. Проверьте названия и отправьте список заново.",
+            reply_markup=diary_menu(),
+        )
+        await callback.answer("Список устарел", show_alert=True)
+        return
+
+    await state.clear()
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramAPIError:
+        pass
+    await callback.message.answer(
+        f"Добавлено продуктов: {len(entries)}.\n\n{format_summary(current_entries)}",
+        reply_markup=diary_menu(),
+    )
+    await callback.answer("Добавлено")
+    await deliver_calorie_alert(callback.message, alert, settings, session_factory)
 
 
 @router.callback_query(F.data.startswith("diary:page:"))

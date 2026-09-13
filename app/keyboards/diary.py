@@ -48,6 +48,24 @@ def diary_portion_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def diary_batch_confirmation() -> InlineKeyboardMarkup:
+    """Ask before saving all products parsed from one message."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Добавить всё",
+                    callback_data="diary:batch:confirm",
+                ),
+                InlineKeyboardButton(
+                    text="Отмена",
+                    callback_data="diary:batch:cancel",
+                ),
+            ]
+        ]
+    )
+
+
 def diary_food_results(foods: list[Food], meal_type: str) -> InlineKeyboardMarkup:
     """Build product choices for adding to a selected meal."""
     return InlineKeyboardMarkup(

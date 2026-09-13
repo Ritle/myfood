@@ -66,13 +66,16 @@ def parse_portion_input(raw: str | None) -> Decimal | None:
     for label, grams in QUICK_PORTIONS:
         if cleaned == label.casefold():
             return grams
+    numeric = parse_decimal(raw)
+    if numeric is not None:
+        return numeric
 
     normalized = re.sub(r"[^\w\s,]+", " ", cleaned, flags=re.UNICODE)
     normalized = " ".join(normalized.split())
     if normalized in {"полстакана", "половина стакана"}:
         return Decimal(100)
 
-    match = re.fullmatch(r"(\d+(?:[,.]\d+)?)\s+(.+)", normalized)
+    match = re.fullmatch(r"(\d+(?:[,.]\d+)?)\s*(.+)", normalized)
     if match is None:
         return parse_decimal(raw)
     quantity = parse_decimal(match.group(1))

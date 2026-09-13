@@ -8,6 +8,7 @@ from app.handlers.diary import is_diary_search_text
 from app.keyboards.diary import diary_portion_keyboard
 from app.models import Base, Food, User
 from app.services.diary import (
+    add_diary_entries,
     add_diary_entry,
     calculate_portion,
     get_entries_for_day,
@@ -18,6 +19,7 @@ from app.services.diary import (
     utc_day_bounds,
 )
 from app.services.foods import normalize_food_text
+from app.utils.food_batches import parse_food_batch_input
 from app.utils.portions import parse_portion_input
 
 
@@ -51,6 +53,7 @@ def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None
     assert parse_portion_input("2 чайных ложки") == Decimal(10)
     assert parse_portion_input("2,5 стакана") == Decimal(500)
     assert parse_portion_input("125,5") == Decimal("125.5")
+    assert parse_portion_input("150г") == Decimal(150)
     assert parse_portion_input("большая тарелка") is None
 
     button_labels = {
@@ -60,6 +63,57 @@ def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None
     }
     assert "🥄 1 чайная ложка ≈5 г" in button_labels
     assert "🥄 1 столовая ложка ≈15 г" in button_labels
+
+
+def test_parses_multi_food_message_with_optional_meal_and_default_weight() -> None:
+    batch = parse_food_batch_input("обед: гречка 150г, курица 180г, огурец")
+
+    assert batch is not None
+    assert batch.meal_type == "lunch"
+    assert [(item.query, item.weight_grams, item.assumed_weight) for item in batch.items] == [
+        ("гречка", Decimal(150), False),
+        ("курица", Decimal(180), False),
+        ("огурец", Decimal(100), True),
+    ]
+    lines = parse_food_batch_input("рис 125,5г\nсуп 1 тарелка")
+    assert lines is not None
+    assert [(item.query, item.weight_grams) for item in lines.items] == [
+        ("рис", Decimal("125.5")),
+        ("суп", Decimal(250)),
+    ]
+    assert parse_food_batch_input("огурец") is None
+
+
+@pytest.mark.asyncio
+async def test_add_diary_entries_saves_confirmed_batch_together() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=101, first_name="Owner")
+            foods = [sample_food(), sample_food()]
+            foods[1].name = "Йогурт"
+            foods[1].name_normalized = normalize_food_text("Йогурт")
+            session.add_all([owner, *foods])
+            await session.commit()
+            await session.refresh(owner)
+            for food in foods:
+                await session.refresh(food)
+
+            entries = await add_diary_entries(
+                session,
+                user_id=owner.id,
+                items=[(foods[0], Decimal(150)), (foods[1], Decimal(200))],
+                meal_type="lunch",
+            )
+            assert len(entries) == 2
+            assert {entry.food_id for entry in entries} == {food.id for food in foods}
+            assert {entry.weight_grams for entry in entries} == {Decimal(150), Decimal(200)}
+            assert entries[0].eaten_at == entries[1].eaten_at
+    finally:
+        await engine.dispose()
 
 
 def test_utc_day_bounds_use_user_timezone() -> None:
