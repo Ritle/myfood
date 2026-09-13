@@ -93,6 +93,3 @@ def load_health_diet_foods(directory: Path = DATA_DIRECTORY) -> tuple[BaseFood, 
                 )
             )
     return tuple(foods)
-
-
-HEALTH_DIET_FOODS = load_health_diet_foods()

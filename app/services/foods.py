@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data import BASE_FOODS
+from app.data.base_foods import BaseFood
 from app.models import Food, FoodEntry
 from app.repositories.favorite_foods import (
     add_favorite,
@@ -278,15 +279,22 @@ async def latest_food_portion_entry(
 
 
 async def seed_base_foods(session: AsyncSession) -> tuple[int, int]:
-    """Insert or update the packaged product catalog without creating duplicates."""
+    """Insert or update the small built-in catalog without creating duplicates."""
+    return await seed_catalog_foods(session, BASE_FOODS)
+
+
+async def seed_catalog_foods(
+    session: AsyncSession, foods: tuple[BaseFood, ...]
+) -> tuple[int, int]:
+    """Insert or update one catalog data set by its stable external identity."""
     created = 0
     updated = 0
-    sources = {item.source for item in BASE_FOODS}
+    sources = {item.source for item in foods}
     existing = {
         (product.source, product.source_ref): product
         for product in await session.scalars(select(Food).where(Food.source.in_(sources)))
     }
-    for item in BASE_FOODS:
+    for item in foods:
         product = existing.get((item.source, item.source_ref))
         if product is None:
             product = Food(

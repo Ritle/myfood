@@ -13,7 +13,6 @@ RUN addgroup --system myfood \
 COPY pyproject.toml alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
-COPY health_diet_data ./health_diet_data
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN python -m pip install --no-cache-dir .

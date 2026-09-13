@@ -3,7 +3,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS, HEALTH_DIET_FOODS
+from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
+from app.data.health_diet import load_health_diet_foods
 from app.handlers.food import answer_food_card
 from app.keyboards.diary import diary_recent_food_results
 from app.keyboards.food import food_card_actions
@@ -20,9 +21,12 @@ from app.services.foods import (
     search_foods,
     search_foods_page,
     seed_base_foods,
+    seed_catalog_foods,
     toggle_food_favorite,
     update_user_food,
 )
+
+HEALTH_DIET_FOODS = load_health_diet_foods()
 
 
 @pytest.mark.asyncio
@@ -40,6 +44,14 @@ async def test_seed_is_idempotent_and_catalog_is_searchable() -> None:
 
             assert await seed_base_foods(session) == (len(BASE_FOODS), 0)
             assert await seed_base_foods(session) == (0, len(BASE_FOODS))
+            assert await seed_catalog_foods(session, HEALTH_DIET_FOODS) == (
+                len(HEALTH_DIET_FOODS),
+                0,
+            )
+            assert await seed_catalog_foods(session, HEALTH_DIET_FOODS) == (
+                0,
+                len(HEALTH_DIET_FOODS),
+            )
             dish_page = await dish_catalog_page(session, user_id=owner.id, page=0)
             dish_search_results = await search_foods(
                 session, user_id=owner.id, query=dish_page.items[0].name
