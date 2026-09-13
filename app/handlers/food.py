@@ -15,7 +15,7 @@ from app.keyboards.food import (
     no_brand,
 )
 from app.keyboards.main_menu import main_menu
-from app.models import Food
+from app.models import Food, User
 from app.repositories.users import get_or_create_user
 from app.services.foods import (
     add_user_food,
@@ -61,10 +61,10 @@ def food_card_text(food) -> str:
 
 
 async def answer_food_card(
-    message: Message, *, food: Food, user_id: int, favorite: bool
+    message: Message, *, food: Food, user: User, favorite: bool
 ) -> None:
     """Send a product card and expose editing only to its private owner."""
-    editable = food.created_by_user_id == user_id and not food.is_public
+    editable = food.created_by_user_id == user.id and not food.is_public
     await message.answer(
         food_card_text(food),
         reply_markup=food_card_actions(food.id, favorite=favorite, editable=editable),
@@ -228,7 +228,7 @@ async def show_food_card(callback: CallbackQuery, session_factory: async_session
         await answer_food_card(
             callback.message,
             food=food,
-            user_id=callback.from_user.id,
+            user=user,
             favorite=favorite,
         )
     await callback.answer()
@@ -399,7 +399,7 @@ async def cancel_food_field_edit(
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("Изменение отменено.", reply_markup=food_menu())
         await answer_food_card(
-            callback.message, food=food, user_id=user.id, favorite=favorite
+            callback.message, food=food, user=user, favorite=favorite
         )
     await callback.answer()
 
@@ -467,7 +467,7 @@ async def save_food_field_edit(
         await message.answer("Продукт недоступен или принадлежит другому пользователю.")
         return
     await message.answer("Изменения сохранены.", reply_markup=food_menu())
-    await answer_food_card(message, food=food, user_id=user.id, favorite=favorite)
+    await answer_food_card(message, food=food, user=user, favorite=favorite)
 
 
 @router.message(F.text == "➕ Создать продукт")

@@ -4,9 +4,10 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
+from app.handlers.food import answer_food_card
 from app.keyboards.diary import diary_recent_food_results
 from app.keyboards.food import food_card_actions
-from app.models import Base, User
+from app.models import Base, Food, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
     add_user_food,
@@ -187,6 +188,39 @@ async def test_owner_can_edit_private_food_without_changing_diary_snapshots() ->
         )
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_private_product_card_shows_edit_action_for_internal_owner_id() -> None:
+    owner = User(id=42, telegram_id=987654321, first_name="Owner")
+    food = Food(
+        id=9,
+        name="Мой продукт",
+        name_normalized="мой продукт",
+        brand=None,
+        brand_normalized=None,
+        calories_per_100g=Decimal(100),
+        protein_per_100g=Decimal(5),
+        fat_per_100g=Decimal(2),
+        carbs_per_100g=Decimal(10),
+        created_by_user_id=owner.id,
+        is_public=False,
+    )
+
+    class CardMessage:
+        reply_markup = None
+
+        async def answer(self, _text: str, **kwargs) -> None:
+            self.reply_markup = kwargs["reply_markup"]
+
+    message = CardMessage()
+    await answer_food_card(message, food=food, user=owner, favorite=False)
+
+    assert any(
+        button.callback_data == "food:edit:9"
+        for row in message.reply_markup.inline_keyboard
+        for button in row
+    )
 
 
 @pytest.mark.asyncio
