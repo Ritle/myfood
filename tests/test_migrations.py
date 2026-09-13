@@ -35,8 +35,11 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
                 "PRAGMA table_info(notification_settings)"
             ).fetchall()
         }
+        food_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(foods)").fetchall()
+        }
 
-    assert revision == ("0012_add_movement_reminders",)
+    assert revision == ("0013_add_food_catalog_section",)
     assert {
         "users",
         "foods",
@@ -53,3 +56,4 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "movement_reminders_enabled",
         "movement_interval_minutes",
     } <= notification_columns
+    assert "catalog_section" in food_columns

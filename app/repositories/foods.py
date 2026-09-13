@@ -19,6 +19,7 @@ async def find_foods(
     normalized_query: str,
     limit: int = 10,
     offset: int = 0,
+    catalog_section: str | None = None,
 ) -> list[Food]:
     """Find visible, active foods by normalized name or brand."""
     visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
@@ -31,6 +32,7 @@ async def find_foods(
                 Food.name_normalized.contains(normalized_query, autoescape=True),
                 Food.brand_normalized.contains(normalized_query, autoescape=True),
             ),
+            *([Food.catalog_section == catalog_section] if catalog_section else []),
         )
         .order_by(Food.is_public.desc(), Food.name)
         .offset(offset)
@@ -40,9 +42,13 @@ async def find_foods(
 
 
 async def count_foods(
-    session: AsyncSession, *, user_id: int, normalized_query: str
+    session: AsyncSession,
+    *,
+    user_id: int,
+    normalized_query: str | None = None,
+    catalog_section: str | None = None,
 ) -> int:
-    """Count visible, active products matching a normalized query."""
+    """Count visible, active products matching an optional query and section."""
     visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
     return int(
         await session.scalar(
@@ -51,10 +57,17 @@ async def count_foods(
             .where(
                 Food.is_archived.is_(False),
                 visibility,
-                or_(
-                    Food.name_normalized.contains(normalized_query, autoescape=True),
-                    Food.brand_normalized.contains(normalized_query, autoescape=True),
+                *(
+                    [
+                        or_(
+                            Food.name_normalized.contains(normalized_query, autoescape=True),
+                            Food.brand_normalized.contains(normalized_query, autoescape=True),
+                        )
+                    ]
+                    if normalized_query is not None
+                    else []
                 ),
+                *([Food.catalog_section == catalog_section] if catalog_section else []),
             )
         )
         or 0

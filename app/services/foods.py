@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data import BASE_FOODS
@@ -22,7 +23,6 @@ from app.repositories.foods import (
     count_foods,
     create_food,
     find_foods,
-    get_food_by_source,
     get_owned_food,
     get_visible_food,
 )
@@ -47,6 +47,7 @@ class RecentFoodPortion:
 
 
 FoodEditableField = Literal["name", "brand", "calories", "protein", "fat", "carbs"]
+CatalogSection = Literal["food", "dish"]
 
 
 def normalize_food_text(value: str) -> str:
@@ -80,8 +81,11 @@ async def add_user_food(
     protein: Decimal,
     fat: Decimal,
     carbs: Decimal,
+    catalog_section: CatalogSection = "food",
 ) -> Food:
-    """Validate and add a private product owned by one user."""
+    """Validate and add a private product or dish owned by one user."""
+    if catalog_section not in {"food", "dish"}:
+        raise ValueError("Неизвестный раздел каталога")
     clean_name = validate_food_name(name)
     clean_brand = validate_food_name(brand, field="Бренд", maximum_length=120) if brand else None
     return await create_food(
@@ -97,6 +101,7 @@ async def add_user_food(
             carbs_per_100g=validate_nutrient(carbs),
             created_by_user_id=user_id,
             is_public=False,
+            catalog_section=catalog_section,
         ),
     )
 
@@ -134,6 +139,30 @@ async def search_foods_page(
         session,
         user_id=user_id,
         normalized_query=normalized,
+        limit=page_size,
+        offset=actual_page * page_size,
+    )
+    return FoodSearchPage(items=items, page=actual_page, total_pages=total_pages)
+
+
+async def dish_catalog_page(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    page: int,
+    page_size: int = 8,
+) -> FoodSearchPage:
+    """Return one page of visible dishes; ordinary product search stays unfiltered."""
+    if page < 0 or not 1 <= page_size <= 20:
+        raise ValueError("invalid catalog page")
+    total = await count_foods(session, user_id=user_id, catalog_section="dish")
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    actual_page = min(page, total_pages - 1)
+    items = await find_foods(
+        session,
+        user_id=user_id,
+        normalized_query="",
+        catalog_section="dish",
         limit=page_size,
         offset=actual_page * page_size,
     )
@@ -249,16 +278,22 @@ async def latest_food_portion_entry(
 
 
 async def seed_base_foods(session: AsyncSession) -> tuple[int, int]:
-    """Insert or update the packaged USDA base catalog without creating duplicates."""
+    """Insert or update the packaged product catalog without creating duplicates."""
     created = 0
     updated = 0
+    sources = {item.source for item in BASE_FOODS}
+    existing = {
+        (product.source, product.source_ref): product
+        for product in await session.scalars(select(Food).where(Food.source.in_(sources)))
+    }
     for item in BASE_FOODS:
-        source_ref = str(item.fdc_id)
-        product = await get_food_by_source(
-            session, source=item.source, source_ref=source_ref
-        )
+        product = existing.get((item.source, item.source_ref))
         if product is None:
-            product = Food(source=item.source, source_ref=source_ref)
+            product = Food(
+                source=item.source,
+                source_ref=item.source_ref,
+                catalog_section=item.catalog_section,
+            )
             session.add(product)
             created += 1
         else:
@@ -274,5 +309,6 @@ async def seed_base_foods(session: AsyncSession) -> tuple[int, int]:
         product.created_by_user_id = None
         product.is_public = True
         product.is_archived = False
+        product.catalog_section = item.catalog_section
     await session.commit()
     return created, updated

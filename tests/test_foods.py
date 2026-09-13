@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
+from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS, HEALTH_DIET_FOODS
 from app.handlers.food import answer_food_card
 from app.keyboards.diary import diary_recent_food_results
 from app.keyboards.food import food_card_actions
@@ -11,6 +11,7 @@ from app.models import Base, Food, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
     add_user_food,
+    dish_catalog_page,
     favorite_foods,
     latest_food_portion_entry,
     load_food,
@@ -39,16 +40,27 @@ async def test_seed_is_idempotent_and_catalog_is_searchable() -> None:
 
             assert await seed_base_foods(session) == (len(BASE_FOODS), 0)
             assert await seed_base_foods(session) == (0, len(BASE_FOODS))
+            dish_page = await dish_catalog_page(session, user_id=owner.id, page=0)
+            dish_search_results = await search_foods(
+                session, user_id=owner.id, query=dish_page.items[0].name
+            )
             results = await search_foods(session, user_id=owner.id, query="куриная")
-            grain_results = await search_foods(session, user_id=owner.id, query="гречневая")
             wildcard_results = await search_foods(session, user_id=owner.id, query="рис%")
 
-        assert {food.source_ref for food in results} >= {"2646170", "331960"}
+        assert any(food.source == "HEALTH_DIET" for food in results)
+        assert dish_page.items
+        assert all(food.catalog_section == "dish" for food in dish_page.items)
+        assert dish_page.items[0] in dish_search_results
         assert all(food.brand is None for food in results)
-        assert any(food.source == "USDA_FNDDS" for food in grain_results)
         assert len(FOUNDATION_FOODS) == 25
         assert len(FNDDS_FOODS) == 134
+        assert len(HEALTH_DIET_FOODS) == 12_975
         assert all(food.source == "USDA_FNDDS" for food in FNDDS_FOODS)
+        assert all(food.source == "HEALTH_DIET" for food in HEALTH_DIET_FOODS)
+        assert all(food.calories <= 1000 for food in HEALTH_DIET_FOODS)
+        assert all(
+            max(food.protein, food.fat, food.carbs) <= 100 for food in HEALTH_DIET_FOODS
+        )
         assert wildcard_results == []
     finally:
         await engine.dispose()
@@ -78,11 +90,27 @@ async def test_private_food_is_visible_only_to_owner() -> None:
                 fat=Decimal(5),
                 carbs=Decimal("1.8"),
             )
+            dish = await add_user_food(
+                session,
+                user_id=owner.id,
+                name="Домашняя лазанья",
+                brand=None,
+                calories=Decimal(175),
+                protein=Decimal(10),
+                fat=Decimal(8),
+                carbs=Decimal(16),
+                catalog_section="dish",
+            )
 
             assert await load_food(session, user_id=owner.id, food_id=food.id) is not None
             assert await load_food(session, user_id=stranger.id, food_id=food.id) is None
             assert len(await search_foods(session, user_id=owner.id, query="ТВОРОГ")) == 1
             assert await search_foods(session, user_id=stranger.id, query="творог") == []
+            owner_dish_page = await dish_catalog_page(session, user_id=owner.id, page=10_000)
+            stranger_dish_page = await dish_catalog_page(session, user_id=stranger.id, page=10_000)
+            assert dish in owner_dish_page.items
+            assert dish in await search_foods(session, user_id=owner.id, query="лазанья")
+            assert dish not in stranger_dish_page.items
     finally:
         await engine.dispose()
 

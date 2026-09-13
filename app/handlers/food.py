@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.keyboards.food import (
+    dish_results,
     food_card_actions,
     food_edit_cancel,
     food_edit_fields,
@@ -19,6 +20,7 @@ from app.models import Food, User
 from app.repositories.users import get_or_create_user
 from app.services.foods import (
     add_user_food,
+    dish_catalog_page,
     favorite_foods,
     food_is_favorite,
     load_food,
@@ -49,14 +51,21 @@ def food_card_text(food) -> str:
     source_name = {
         "USDA_FDC": "USDA FoodData Central Foundation Foods",
         "USDA_FNDDS": "USDA FoodData Central Survey Foods",
-    }.get(food.source or "", "USDA FoodData Central")
-    source = f"\nИсточник: {source_name}, FDC {food.source_ref}" if food.source_ref else ""
+        "HEALTH_DIET": "пользовательский экспорт Health Diet",
+    }.get(food.source or "", "пользовательский каталог")
+    fdc_suffix = (
+        f", FDC {food.source_ref}"
+        if food.source in {"USDA_FDC", "USDA_FNDDS"} and food.source_ref
+        else ""
+    )
+    source = f"\nИсточник: {source_name}{fdc_suffix}" if food.source_ref else ""
+    section = "\nРаздел: блюда" if food.catalog_section == "dish" else ""
     return (
         f"{food.name}{brand}\n\nНа 100 г:\n"
         f"{format_decimal(food.calories_per_100g)} ккал\n"
         f"Б: {format_decimal(food.protein_per_100g)} г\n"
         f"Ж: {format_decimal(food.fat_per_100g)} г\n"
-        f"У: {format_decimal(food.carbs_per_100g)} г{source}"
+        f"У: {format_decimal(food.carbs_per_100g)} г{section}{source}"
     )
 
 
@@ -91,6 +100,53 @@ async def begin_food_search(message: Message, state: FSMContext) -> None:
     """Prompt for a catalog query."""
     await state.set_state(FoodSearch.query)
     await message.answer("Введите название продукта или бренд:", reply_markup=ReplyKeyboardRemove())
+
+
+@router.message(F.text == "🍽 Блюда")
+async def show_dish_catalog(
+    message: Message, state: FSMContext, session_factory: async_sessionmaker
+) -> None:
+    """Open the dedicated dish catalog; dishes also remain in ordinary search."""
+    if message.from_user is None:
+        return
+    await state.clear()
+    async with session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+        )
+        page = await dish_catalog_page(session, user_id=user.id, page=0)
+    await message.answer(
+        "Блюда в каталоге:",
+        reply_markup=dish_results(page.items, page=page.page, total_pages=page.total_pages),
+    )
+
+
+@router.callback_query(F.data.startswith("food:dishes:page:"))
+async def paginate_dish_catalog(
+    callback: CallbackQuery, session_factory: async_sessionmaker
+) -> None:
+    """Move through the dedicated dish catalog."""
+    try:
+        requested_page = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Некорректная страница", show_alert=True)
+        return
+    async with session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name,
+        )
+        page = await dish_catalog_page(session, user_id=user.id, page=requested_page)
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(
+            reply_markup=dish_results(page.items, page=page.page, total_pages=page.total_pages)
+        )
+    await callback.answer()
 
 
 @router.message(FoodSearch.query)
@@ -470,11 +526,14 @@ async def save_food_field_edit(
     await answer_food_card(message, food=food, user=user, favorite=favorite)
 
 
-@router.message(F.text == "➕ Создать продукт")
+@router.message(F.text.in_({"➕ Создать продукт", "➕ Создать блюдо"}))
 async def begin_food_creation(message: Message, state: FSMContext) -> None:
-    """Start collecting a private product."""
+    """Start collecting a private product or ready dish."""
+    catalog_section = "dish" if message.text == "➕ Создать блюдо" else "food"
+    kind = "блюда" if catalog_section == "dish" else "продукта"
+    await state.update_data(catalog_section=catalog_section)
     await state.set_state(FoodCreation.name)
-    await message.answer("Введите название продукта:", reply_markup=ReplyKeyboardRemove())
+    await message.answer(f"Введите название {kind}:", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(FoodCreation.name)
@@ -570,6 +629,11 @@ async def enter_food_carbs(
     if message.from_user is None:
         return
     data = await state.get_data()
+    catalog_section = data.get("catalog_section", "food")
+    if catalog_section not in {"food", "dish"}:
+        await state.clear()
+        await message.answer("Сеанс создания завершился. Откройте каталог и начните снова.")
+        return
     async with session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -586,9 +650,11 @@ async def enter_food_carbs(
             protein=data["protein"],
             fat=data["fat"],
             carbs=carbs,
+            catalog_section=catalog_section,
         )
     await state.clear()
+    kind = "Блюдо" if catalog_section == "dish" else "Продукт"
     await message.answer(
-        f"Продукт «{product.name}» сохранен в вашем каталоге.",
+        f"{kind} «{product.name}» сохранен в вашем каталоге.",
         reply_markup=food_menu(),
     )

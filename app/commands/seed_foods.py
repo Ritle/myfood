@@ -6,7 +6,7 @@ from app.services.foods import seed_base_foods
 
 
 async def main() -> None:
-    """Load the packaged USDA products into the configured database."""
+    """Load packaged catalog products into the configured database."""
     settings = get_settings()
     engine, session_factory = create_database(settings.database_url)
     try:

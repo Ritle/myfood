@@ -4,19 +4,20 @@ from decimal import Decimal
 
 @dataclass(frozen=True, slots=True)
 class BaseFood:
-    """One USDA-derived public catalog item, with values per 100 grams."""
+    """One packaged catalog item, with values per 100 grams."""
 
-    fdc_id: int
+    source_ref: str
     name: str
     calories: Decimal
     protein: Decimal
     fat: Decimal
     carbs: Decimal
     source: str = "USDA_FDC"
+    catalog_section: str = "food"
 
 
 def food(
-    fdc_id: int,
+    source_ref: int | str,
     name: str,
     calories: str,
     protein: str,
@@ -24,16 +25,18 @@ def food(
     carbs: str,
     *,
     source: str = "USDA_FDC",
+    catalog_section: str = "food",
 ) -> BaseFood:
-    """Create an exact decimal reference item from compact source literals."""
+    """Create an exact decimal catalog item from compact source literals."""
     return BaseFood(
-        fdc_id=fdc_id,
+        source_ref=str(source_ref),
         name=name,
         calories=Decimal(calories),
         protein=Decimal(protein),
         fat=Decimal(fat),
         carbs=Decimal(carbs),
         source=source,
+        catalog_section=catalog_section,
     )
 
 
