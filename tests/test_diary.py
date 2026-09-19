@@ -5,7 +5,11 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.handlers.diary import is_diary_search_text
-from app.keyboards.diary import diary_portion_keyboard
+from app.keyboards.diary import (
+    FINISH_DIARY_ADDING_TEXT,
+    diary_menu,
+    diary_portion_keyboard,
+)
 from app.models import Base, DiaryDay, Food, User
 from app.services.diary import (
     add_diary_entries,
@@ -42,6 +46,28 @@ def test_calculates_portion_with_consistent_rounding() -> None:
     assert portion.protein == Decimal("28.80")
     assert portion.fat == Decimal("9.00")
     assert portion.carbs == Decimal("5.40")
+
+
+def test_active_meal_entry_has_explicit_finish_action() -> None:
+    active_labels = {
+        button.text
+        for row in diary_menu(adding=True).keyboard
+        for button in row
+    }
+    normal_labels = {
+        button.text
+        for row in diary_menu().keyboard
+        for button in row
+    }
+    portion_labels = {
+        button.text
+        for row in diary_portion_keyboard().keyboard
+        for button in row
+    }
+
+    assert FINISH_DIARY_ADDING_TEXT in active_labels
+    assert FINISH_DIARY_ADDING_TEXT in portion_labels
+    assert FINISH_DIARY_ADDING_TEXT not in normal_labels
 
 
 def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
@@ -144,6 +170,7 @@ def test_diary_search_leaves_meal_and_navigation_buttons_for_their_handlers() ->
     assert not is_diary_search_text("📋 Дневник за сегодня")
     assert not is_diary_search_text("📚 Каталог продуктов")
     assert not is_diary_search_text("↩️ Главное меню")
+    assert not is_diary_search_text(FINISH_DIARY_ADDING_TEXT)
     assert not is_diary_search_text("/today")
 
 
