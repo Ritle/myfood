@@ -27,6 +27,7 @@ from app.models import Food, FoodEntry, User
 from app.repositories.notifications import mark_notification_sent
 from app.repositories.users import get_or_create_user
 from app.services.calorie_alerts import CalorieAlert, claim_calorie_alert
+from app.services.days import get_or_create_active_diary_day
 from app.services.diary import (
     MEAL_LABELS,
     add_diary_entries,
@@ -34,7 +35,6 @@ from app.services.diary import (
     calculate_portion,
     get_entries_for_day,
     load_owned_entry,
-    local_today,
     remove_diary_entry,
     resize_diary_entry,
     suggest_meal_type,
@@ -899,14 +899,13 @@ async def ensure_user(session: AsyncSession, telegram_user: TelegramUser) -> Use
 
 
 async def today_entries(session: AsyncSession, user: User) -> list[FoodEntry]:
-    """Load the current user's entries for their local today."""
-    day = local_today(user.timezone, day_boundary_time=user.day_boundary_time)
+    """Load entries for the user's currently active logical day."""
+    day = await get_or_create_active_diary_day(session, user=user)
     return await get_entries_for_day(
         session,
         user_id=user.id,
-        day=day,
+        day=day.logical_date,
         timezone_name=user.timezone,
-        day_boundary_time=user.day_boundary_time,
     )
 
 
@@ -962,10 +961,11 @@ async def claim_alert_for_change(
     """Claim a calorie alert when a diary mutation crosses a configured threshold."""
     if user.daily_calorie_target is None:
         return None
+    day = await get_or_create_active_diary_day(session, user=user)
     return await claim_calorie_alert(
         session,
         user_id=user.id,
-        local_date=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
+        local_date=day.logical_date,
         previous_total=previous_total,
         current_total=current_total,
         target=Decimal(user.daily_calorie_target),
