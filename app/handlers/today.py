@@ -27,10 +27,18 @@ async def show_today(message: Message, session_factory: async_sessionmaker) -> N
         )
         day = local_today(user.timezone, day_boundary_time=user.day_boundary_time)
         entries = await get_entries_for_day(
-            session, user_id=user.id, day=day, timezone_name=user.timezone, day_boundary_time=user.day_boundary_time
+            session,
+            user_id=user.id,
+            day=day,
+            timezone_name=user.timezone,
+            day_boundary_time=user.day_boundary_time,
         )
         water_entries = await get_water_for_day(
-            session, user_id=user.id, day=day, timezone_name=user.timezone
+            session,
+            user_id=user.id,
+            day=day,
+            timezone_name=user.timezone,
+            day_boundary_time=user.day_boundary_time,
         )
         text = format_today(user, entries, water_ml=total_water(water_entries))
     await message.answer(text, reply_markup=main_menu())
