@@ -411,10 +411,18 @@ async def build_history_page(
 ):
     """Load and render one paginated history date."""
     entries = await get_entries_for_day(
-        session, user_id=user.id, day=day, timezone_name=user.timezone
+        session,
+        user_id=user.id,
+        day=day,
+        timezone_name=user.timezone,
+        day_boundary_time=user.day_boundary_time,
     )
     water_entries = await get_water_for_day(
-        session, user_id=user.id, day=day, timezone_name=user.timezone
+        session,
+        user_id=user.id,
+        day=day,
+        timezone_name=user.timezone,
+        day_boundary_time=user.day_boundary_time,
     )
     total_pages = max(1, (len(entries) + PAGE_SIZE - 1) // PAGE_SIZE)
     actual_page = min(max(0, page), total_pages - 1)
