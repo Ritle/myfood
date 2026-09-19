@@ -10,13 +10,13 @@ def close_day_confirmation(day_id: int, logical_date: date) -> InlineKeyboardMar
             [
                 InlineKeyboardButton(
                     text=f"🌙 Завершить {logical_date:%d.%m}",
-                    callback_data=f"day:close:{day_id}",
+                    callback_data=f"day:confirm:{day_id}",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="Отмена",
-                    callback_data="day:close:cancel",
+                    callback_data="day:cancel",
                 )
             ],
         ]
