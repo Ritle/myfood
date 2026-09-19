@@ -60,8 +60,8 @@ async def show_settings(
     await message.answer(
         format_notification_settings(user, settings),
         reply_markup=notification_settings_keyboard(
-                settings, user.timezone, user.day_boundary_time
-            ),
+            settings, user.timezone, user.day_boundary_time
+        ),
     )
     await message.answer("Главное меню остается доступно ниже.", reply_markup=main_menu())
 
@@ -83,8 +83,8 @@ async def toggle_setting(
         await callback.message.edit_text(
             format_notification_settings(user, settings),
             reply_markup=notification_settings_keyboard(
-                settings, user.timezone, user.day_boundary_time
-            ),
+            settings, user.timezone, user.day_boundary_time
+        ),
         )
     await callback.answer("Настройка сохранена")
 
@@ -180,8 +180,8 @@ async def save_setting_edit(
     await message.answer(
         f"Настройка сохранена.\n\n{format_notification_settings(user, settings)}",
         reply_markup=notification_settings_keyboard(
-                settings, user.timezone, user.day_boundary_time
-            ),
+            settings, user.timezone, user.day_boundary_time
+        ),
     )
     await message.answer("Главное меню", reply_markup=main_menu())
 
