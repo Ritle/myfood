@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -6,13 +6,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.handlers.diary import is_diary_search_text
 from app.keyboards.diary import diary_portion_keyboard
-from app.models import Base, Food, User
+from app.models import Base, DiaryDay, Food, User
 from app.services.diary import (
     add_diary_entries,
     add_diary_entry,
     calculate_portion,
     get_entries_for_day,
-    local_today,
     remove_diary_entry,
     resize_diary_entry,
     suggest_meal_type,
@@ -124,29 +123,6 @@ def test_utc_day_bounds_use_user_timezone() -> None:
     assert end == datetime(2026, 9, 12, 21, tzinfo=UTC)
 
 
-def test_custom_day_boundary_shifts_logical_day_and_bounds() -> None:
-    boundary = time(3)
-
-    assert local_today(
-        "Europe/Moscow",
-        day_boundary_time=boundary,
-        now=datetime(2026, 9, 19, 22, 30, tzinfo=UTC),
-    ) == date(2026, 9, 19)
-    assert local_today(
-        "Europe/Moscow",
-        day_boundary_time=boundary,
-        now=datetime(2026, 9, 20, 0, 0, tzinfo=UTC),
-    ) == date(2026, 9, 20)
-
-    start, end = utc_day_bounds(
-        date(2026, 9, 19),
-        "Europe/Moscow",
-        day_boundary_time=boundary,
-    )
-    assert start == datetime(2026, 9, 19, 0, 0, tzinfo=UTC)
-    assert end == datetime(2026, 9, 20, 0, 0, tzinfo=UTC)
-
-
 @pytest.mark.parametrize(
     ("now", "expected"),
     [
@@ -225,5 +201,66 @@ async def test_diary_crud_preserves_snapshot_and_checks_ownership() -> None:
             assert resized.calories == Decimal("290.00")
             assert not await remove_diary_entry(session, user_id=stranger.id, entry_id=entry.id)
             assert await remove_diary_entry(session, user_id=owner.id, entry_id=entry.id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_manual_day_keeps_after_midnight_entries_until_user_closes_it() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=55, first_name="Owner", timezone="Europe/Moscow")
+            food = sample_food()
+            session.add_all([owner, food])
+            await session.flush()
+            session.add(
+                DiaryDay(
+                    user_id=owner.id,
+                    logical_date=date(2026, 9, 19),
+                    started_at=datetime(2026, 9, 18, 21, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 9, 19, 23, 0, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(food)
+
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="dinner",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 20, 30, tzinfo=UTC),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="snack",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 22, 0, tzinfo=UTC),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="breakfast",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 23, 30, tzinfo=UTC),
+            )
+
+            entries = await get_entries_for_day(
+                session,
+                user_id=owner.id,
+                day=date(2026, 9, 19),
+                timezone_name=owner.timezone,
+            )
+
+            assert [entry.meal_type for entry in entries] == ["dinner", "snack"]
     finally:
         await engine.dispose()
