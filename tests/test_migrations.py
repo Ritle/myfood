@@ -38,8 +38,11 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         food_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(foods)").fetchall()
         }
+        diary_day_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(diary_days)").fetchall()
+        }
 
-    assert revision == ("0013_add_food_catalog_section",)
+    assert revision == ("0014_create_diary_days",)
     assert {
         "users",
         "foods",
@@ -51,9 +54,11 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "favorite_foods",
         "meal_templates",
         "meal_template_items",
+        "diary_days",
     } <= tables
     assert {
         "movement_reminders_enabled",
         "movement_interval_minutes",
     } <= notification_columns
     assert "catalog_section" in food_columns
+    assert {"user_id", "logical_date", "started_at", "ended_at"} <= diary_day_columns

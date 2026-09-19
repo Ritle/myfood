@@ -15,7 +15,7 @@ from app.keyboards.water import (
 )
 from app.models import User, WaterEntry
 from app.repositories.users import get_or_create_user
-from app.services.diary import local_today
+from app.services.days import get_or_create_active_diary_day
 from app.services.water import (
     add_water,
     change_water_amount,
@@ -226,11 +226,12 @@ async def ensure_user(session: AsyncSession, telegram_user: TelegramUser) -> Use
 
 
 async def today_water(session: AsyncSession, user: User) -> list[WaterEntry]:
-    """Load the current user's water entries for their local today."""
+    """Load water entries for the user's currently active logical day."""
+    day = await get_or_create_active_diary_day(session, user=user)
     return await get_water_for_day(
         session,
         user_id=user.id,
-        day=local_today(user.timezone),
+        day=day.logical_date,
         timezone_name=user.timezone,
     )
 

@@ -5,8 +5,12 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.handlers.diary import is_diary_search_text
-from app.keyboards.diary import diary_portion_keyboard
-from app.models import Base, Food, User
+from app.keyboards.diary import (
+    FINISH_DIARY_ADDING_TEXT,
+    diary_menu,
+    diary_portion_keyboard,
+)
+from app.models import Base, DiaryDay, Food, User
 from app.services.diary import (
     add_diary_entries,
     add_diary_entry,
@@ -42,6 +46,28 @@ def test_calculates_portion_with_consistent_rounding() -> None:
     assert portion.protein == Decimal("28.80")
     assert portion.fat == Decimal("9.00")
     assert portion.carbs == Decimal("5.40")
+
+
+def test_active_meal_entry_has_explicit_finish_action() -> None:
+    active_labels = {
+        button.text
+        for row in diary_menu(adding=True).keyboard
+        for button in row
+    }
+    normal_labels = {
+        button.text
+        for row in diary_menu().keyboard
+        for button in row
+    }
+    portion_labels = {
+        button.text
+        for row in diary_portion_keyboard().keyboard
+        for button in row
+    }
+
+    assert FINISH_DIARY_ADDING_TEXT in active_labels
+    assert FINISH_DIARY_ADDING_TEXT in portion_labels
+    assert FINISH_DIARY_ADDING_TEXT not in normal_labels
 
 
 def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
@@ -144,6 +170,7 @@ def test_diary_search_leaves_meal_and_navigation_buttons_for_their_handlers() ->
     assert not is_diary_search_text("📋 Дневник за сегодня")
     assert not is_diary_search_text("📚 Каталог продуктов")
     assert not is_diary_search_text("↩️ Главное меню")
+    assert not is_diary_search_text(FINISH_DIARY_ADDING_TEXT)
     assert not is_diary_search_text("/today")
 
 
@@ -201,5 +228,66 @@ async def test_diary_crud_preserves_snapshot_and_checks_ownership() -> None:
             assert resized.calories == Decimal("290.00")
             assert not await remove_diary_entry(session, user_id=stranger.id, entry_id=entry.id)
             assert await remove_diary_entry(session, user_id=owner.id, entry_id=entry.id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_manual_day_keeps_after_midnight_entries_until_user_closes_it() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=55, first_name="Owner", timezone="Europe/Moscow")
+            food = sample_food()
+            session.add_all([owner, food])
+            await session.flush()
+            session.add(
+                DiaryDay(
+                    user_id=owner.id,
+                    logical_date=date(2026, 9, 19),
+                    started_at=datetime(2026, 9, 18, 21, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 9, 19, 23, 0, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(food)
+
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="dinner",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 20, 30, tzinfo=UTC),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="snack",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 22, 0, tzinfo=UTC),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="breakfast",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 19, 23, 30, tzinfo=UTC),
+            )
+
+            entries = await get_entries_for_day(
+                session,
+                user_id=owner.id,
+                day=date(2026, 9, 19),
+                timezone_name=owner.timezone,
+            )
+
+            assert [entry.meal_type for entry in entries] == ["dinner", "snack"]
     finally:
         await engine.dispose()

@@ -1,11 +1,11 @@
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models import Base, NotificationLog, NotificationSettings, User
+from app.models import Base, DiaryDay, NotificationLog, NotificationSettings, User
 from app.services.notifications import (
     is_quiet_time,
     latest_movement_slot,
@@ -84,6 +84,14 @@ async def test_planning_is_deduplicated_for_meal_water_and_report() -> None:
             await session.flush()
             settings.user_id = user.id
             session.add(settings)
+            session.add(
+                DiaryDay(
+                    user_id=user.id,
+                    logical_date=date(2026, 9, 11),
+                    started_at=datetime(2026, 9, 10, 21, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 9, 11, 22, 0, tzinfo=UTC),
+                )
+            )
             await session.commit()
 
             now = datetime(2026, 9, 12, 6, 30, tzinfo=UTC)

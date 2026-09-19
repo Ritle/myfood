@@ -19,11 +19,11 @@ from app.keyboards.main_menu import main_menu
 from app.models import FoodEntry, User
 from app.repositories.users import get_or_create_user
 from app.services.calorie_alerts import CalorieAlert, claim_calorie_alert
+from app.services.days import get_or_create_active_diary_day
 from app.services.diary import (
     MEAL_LABELS,
     get_entries_for_day,
     load_owned_entry,
-    local_today,
     summarize_entries,
 )
 from app.services.foods import load_food
@@ -56,8 +56,10 @@ async def show_history(
     await state.clear()
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
-        day = local_today(user.timezone)
-        text, keyboard = await build_history_page(session, user=user, day=day, page=0)
+        active_day = await get_or_create_active_diary_day(session, user=user)
+        text, keyboard = await build_history_page(
+            session, user=user, day=active_day.logical_date, page=0
+        )
     await message.answer(text, reply_markup=keyboard)
     await message.answer("Главное меню", reply_markup=main_menu())
 
@@ -73,7 +75,8 @@ async def change_history_day(
         return
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
-        if day > local_today(user.timezone):
+        active_day = await get_or_create_active_diary_day(session, user=user)
+        if day > active_day.logical_date:
             await callback.answer("Будущий день пока недоступен", show_alert=True)
             return
         text, keyboard = await build_history_page(session, user=user, day=day, page=0)
@@ -107,7 +110,8 @@ async def select_history_date(
         return
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
-        if day > local_today(user.timezone):
+        active_day = await get_or_create_active_diary_day(session, user=user)
+        if day > active_day.logical_date:
             await message.answer("Будущая дата пока недоступна.")
             return
         text, keyboard = await build_history_page(session, user=user, day=day, page=0)
@@ -133,7 +137,8 @@ async def change_history_page(
         return
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
-        if day > local_today(user.timezone):
+        active_day = await get_or_create_active_diary_day(session, user=user)
+        if day > active_day.logical_date:
             await callback.answer("Будущий день пока недоступен", show_alert=True)
             return
         text, keyboard = await build_history_page(
@@ -420,9 +425,10 @@ async def build_history_page(
         page=actual_page,
         total_pages=total_pages,
     )
+    active_day = await get_or_create_active_diary_day(session, user=user)
     keyboard = history_keyboard(
         day=day,
-        today=local_today(user.timezone),
+        today=active_day.logical_date,
         visible_entries=visible,
         all_entries=entries,
         page=actual_page,
@@ -460,11 +466,12 @@ def format_history_day(
 
 
 async def current_day_entries(session: AsyncSession, user: User) -> list[FoodEntry]:
-    """Load the user's current local diary day."""
+    """Load the user's currently active logical diary day."""
+    day = await get_or_create_active_diary_day(session, user=user)
     return await get_entries_for_day(
         session,
         user_id=user.id,
-        day=local_today(user.timezone),
+        day=day.logical_date,
         timezone_name=user.timezone,
     )
 
@@ -480,10 +487,11 @@ async def claim_repeat_alert(
     """Claim any calorie threshold crossed by repeated history entries."""
     if user.daily_calorie_target is None:
         return None
+    day = await get_or_create_active_diary_day(session, user=user)
     return await claim_calorie_alert(
         session,
         user_id=user.id,
-        local_date=local_today(user.timezone),
+        local_date=day.logical_date,
         previous_total=summarize_entries(previous).calories,
         current_total=summarize_entries(current).calories,
         target=Decimal(user.daily_calorie_target),

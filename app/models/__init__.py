@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.diary_day import DiaryDay
 from app.models.favorite_food import FavoriteFood
 from app.models.food import Food
 from app.models.food_entry import FoodEntry
@@ -11,6 +12,7 @@ from app.models.weight_entry import WeightEntry
 
 __all__ = [
     "Base",
+    "DiaryDay",
     "FavoriteFood",
     "Food",
     "FoodEntry",

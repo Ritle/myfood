@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.keyboards.notifications import meal_reminder_actions
 from app.models import NotificationLog, NotificationSettings, User
+from app.repositories.diary_days import get_latest_closed_diary_day
 from app.repositories.notification_settings import (
     get_or_create_notification_settings,
     list_users_with_notification_settings,
@@ -19,6 +20,7 @@ from app.repositories.notifications import (
     record_notification_failure,
     try_create_notification,
 )
+from app.services.days import get_or_create_active_diary_day
 from app.services.diary import MEAL_LABELS, get_entries_for_day
 from app.services.today import format_today
 from app.services.water import get_water_for_day, total_water
@@ -84,7 +86,8 @@ async def plan_user_notifications(
     """Claim currently due logical events for one user."""
     zone = ZoneInfo(user.timezone)
     local_now = now.astimezone(zone)
-    local_day = local_now.date()
+    active_day = await get_or_create_active_diary_day(session, user=user, now=now)
+    local_day = active_day.logical_date
     if is_quiet_time(
         local_now.time(), settings.quiet_start_time, settings.quiet_end_time
     ):
@@ -160,13 +163,16 @@ async def plan_user_notifications(
             scheduled_time=settings.morning_report_time,
             grace=REPORT_GRACE,
         )
-        if scheduled_local is not None:
+        latest_closed = await get_latest_closed_diary_day(session, user_id=user.id)
+        if scheduled_local is not None and latest_closed is not None:
             await try_create_notification(
                 session,
                 user_id=user.id,
                 notification_type="morning_report",
-                local_date=local_day,
-                deduplication_key=f"report:{user.id}:{local_day.isoformat()}",
+                local_date=latest_closed.logical_date,
+                deduplication_key=(
+                    f"report:{user.id}:{latest_closed.logical_date.isoformat()}"
+                ),
                 scheduled_for=scheduled_local.astimezone(UTC),
             )
 
@@ -207,9 +213,11 @@ async def deliver_scheduled_notification(
         local_now.time(), settings.quiet_start_time, settings.quiet_end_time
     ):
         return
-    if log.local_date != local_now.date():
-        await mark_notification_suppressed(session, log.id)
-        return
+    if log.notification_type != "morning_report":
+        active_day = await get_or_create_active_diary_day(session, user=user, now=now)
+        if log.local_date != active_day.logical_date:
+            await mark_notification_suppressed(session, log.id)
+            return
     text, reply_markup = await build_notification(
         session, log=log, user=user, settings=settings
     )
@@ -290,7 +298,7 @@ async def build_notification(
     if log.notification_type == "morning_report":
         if not settings.morning_report_enabled:
             return None, None
-        report_day = log.local_date - timedelta(days=1)
+        report_day = log.local_date
         food_entries = await get_entries_for_day(
             session,
             user_id=user.id,
