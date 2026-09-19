@@ -900,8 +900,14 @@ async def ensure_user(session: AsyncSession, telegram_user: TelegramUser) -> Use
 
 async def today_entries(session: AsyncSession, user: User) -> list[FoodEntry]:
     """Load the current user's entries for their local today."""
-    day = local_today(user.timezone)
-    return await get_entries_for_day(session, user_id=user.id, day=day, timezone_name=user.timezone)
+    day = local_today(user.timezone, day_boundary_time=user.day_boundary_time)
+    return await get_entries_for_day(
+        session,
+        user_id=user.id,
+        day=day,
+        timezone_name=user.timezone,
+        day_boundary_time=user.day_boundary_time,
+    )
 
 
 def format_diary(entries: list[FoodEntry]) -> str:
@@ -959,7 +965,7 @@ async def claim_alert_for_change(
     return await claim_calorie_alert(
         session,
         user_id=user.id,
-        local_date=local_today(user.timezone),
+        local_date=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
         previous_total=previous_total,
         current_total=current_total,
         target=Decimal(user.daily_calorie_target),
