@@ -230,8 +230,9 @@ async def today_water(session: AsyncSession, user: User) -> list[WaterEntry]:
     return await get_water_for_day(
         session,
         user_id=user.id,
-        day=local_today(user.timezone),
+        day=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
         timezone_name=user.timezone,
+        day_boundary_time=user.day_boundary_time,
     )
 
 
