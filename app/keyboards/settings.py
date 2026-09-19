@@ -1,10 +1,14 @@
+from datetime import time
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.models import NotificationSettings
 
 
 def notification_settings_keyboard(
-    settings: NotificationSettings, timezone_name: str
+    settings: NotificationSettings,
+    timezone_name: str,
+    day_boundary_time: time = time.min,
 ) -> InlineKeyboardMarkup:
     """Build controls for notification preferences."""
     return InlineKeyboardMarkup(
@@ -13,6 +17,12 @@ def notification_settings_keyboard(
                 InlineKeyboardButton(
                     text=f"Часовой пояс: {timezone_name}",
                     callback_data="settings:edit:timezone",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🌙 Новый день с {clock(day_boundary_time)}",
+                    callback_data="settings:edit:day_boundary",
                 )
             ],
             [
