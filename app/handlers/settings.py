@@ -83,8 +83,8 @@ async def toggle_setting(
         await callback.message.edit_text(
             format_notification_settings(user, settings),
             reply_markup=notification_settings_keyboard(
-            settings, user.timezone, user.day_boundary_time
-        ),
+                settings, user.timezone, user.day_boundary_time
+            ),
         )
     await callback.answer("Настройка сохранена")
 
@@ -119,7 +119,9 @@ async def save_setting_edit(
         if name == "day_boundary":
             value = parse_clock(message.text)
             if value is None:
-                await message.answer("Введите корректное время в формате ЧЧ:ММ, например 03:00.")
+                await message.answer(
+                    "Введите корректное время в формате ЧЧ:ММ, например 03:00."
+                )
                 return
             user = await set_user_day_boundary(session, user=user, value=value)
         elif name in TIME_FIELDS:
