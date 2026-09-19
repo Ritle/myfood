@@ -1,7 +1,7 @@
-from datetime import date, datetime, time
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, Integer, Numeric, String, Time, func, text
+from sqlalchemy import BigInteger, Date, DateTime, Integer, Numeric, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -17,9 +17,6 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str] = mapped_column(String(128))
     timezone: Mapped[str] = mapped_column(String(64), server_default=text("'Europe/Moscow'"))
-    day_boundary_time: Mapped[time] = mapped_column(
-        Time, default=time.min, server_default=text("'00:00:00'")
-    )
     gender: Mapped[str | None] = mapped_column(String(16), nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     height_cm: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
