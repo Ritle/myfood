@@ -134,16 +134,6 @@ async def set_time_range(
     return await save_notification_settings(session, settings)
 
 
-async def set_user_day_boundary(
-    session: AsyncSession, *, user: User, value: time
-) -> User:
-    """Persist the local time at which a new logical diary day starts."""
-    user.day_boundary_time = value
-    await session.commit()
-    await session.refresh(user)
-    return user
-
-
 async def set_user_timezone(
     session: AsyncSession, *, user: User, timezone_name: str
 ) -> User:
