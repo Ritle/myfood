@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,10 +56,17 @@ async def add_water(
 
 
 async def get_water_for_day(
-    session: AsyncSession, *, user_id: int, day: date, timezone_name: str
+    session: AsyncSession,
+    *,
+    user_id: int,
+    day: date,
+    timezone_name: str,
+    day_boundary_time: time = time.min,
 ) -> list[WaterEntry]:
-    """Load water entries for one user-local calendar day."""
-    start_at, end_at = utc_day_bounds(day, timezone_name)
+    """Load water entries for one user-defined logical day."""
+    start_at, end_at = utc_day_bounds(
+        day, timezone_name, day_boundary_time=day_boundary_time
+    )
     return await list_water_entries(
         session, user_id=user_id, start_at=start_at, end_at=end_at
     )
