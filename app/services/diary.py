@@ -66,19 +66,29 @@ def summarize_entries(entries: list[FoodEntry]) -> DiarySummary:
     )
 
 
-def utc_day_bounds(day: date, timezone_name: str) -> tuple[datetime, datetime]:
-    """Convert a user's local calendar day to a UTC half-open interval."""
+def utc_day_bounds(
+    day: date,
+    timezone_name: str,
+    *,
+    day_boundary_time: time = time.min,
+) -> tuple[datetime, datetime]:
+    """Convert one user-defined diary day to a UTC half-open interval."""
     try:
         zone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError as error:
         raise ValueError("unknown user timezone") from error
-    start_local = datetime.combine(day, time.min, tzinfo=zone)
-    end_local = datetime.combine(day + timedelta(days=1), time.min, tzinfo=zone)
+    start_local = datetime.combine(day, day_boundary_time, tzinfo=zone)
+    end_local = datetime.combine(day + timedelta(days=1), day_boundary_time, tzinfo=zone)
     return start_local.astimezone(UTC), end_local.astimezone(UTC)
 
 
-def local_today(timezone_name: str, *, now: datetime | None = None) -> date:
-    """Return the current calendar date in a user's timezone."""
+def local_today(
+    timezone_name: str,
+    *,
+    day_boundary_time: time = time.min,
+    now: datetime | None = None,
+) -> date:
+    """Return the current logical diary date in a user's timezone."""
     try:
         zone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError as error:
@@ -86,7 +96,10 @@ def local_today(timezone_name: str, *, now: datetime | None = None) -> date:
     current = now or datetime.now(UTC)
     if current.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    return current.astimezone(zone).date()
+    local_now = current.astimezone(zone)
+    if local_now.time() < day_boundary_time:
+        return local_now.date() - timedelta(days=1)
+    return local_now.date()
 
 
 def suggest_meal_type(timezone_name: str, *, now: datetime | None = None) -> str:
@@ -175,10 +188,17 @@ async def add_diary_entries(
 
 
 async def get_entries_for_day(
-    session: AsyncSession, *, user_id: int, day: date, timezone_name: str
+    session: AsyncSession,
+    *,
+    user_id: int,
+    day: date,
+    timezone_name: str,
+    day_boundary_time: time = time.min,
 ) -> list[FoodEntry]:
-    """Load all diary entries for one user-local calendar day."""
-    start_at, end_at = utc_day_bounds(day, timezone_name)
+    """Load all diary entries for one user-defined logical day."""
+    start_at, end_at = utc_day_bounds(
+        day, timezone_name, day_boundary_time=day_boundary_time
+    )
     return await list_food_entries(session, user_id=user_id, start_at=start_at, end_at=end_at)
 
 
