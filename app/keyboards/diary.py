@@ -12,25 +12,35 @@ from app.services.foods import RecentFoodPortion
 from app.utils.formatting import format_decimal
 from app.utils.portions import QUICK_PORTIONS
 
+FINISH_DIARY_ADDING_TEXT = "✅ Завершить добавление"
 
-def diary_menu() -> ReplyKeyboardMarkup:
-    """Build meal selection and diary navigation."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text=MEAL_LABELS["breakfast"]),
-                KeyboardButton(text=MEAL_LABELS["lunch"]),
-            ],
-            [
-                KeyboardButton(text=MEAL_LABELS["dinner"]),
-                KeyboardButton(text=MEAL_LABELS["snack"]),
-            ],
+
+def diary_menu(*, adding: bool = False) -> ReplyKeyboardMarkup:
+    """Build meal selection and diary navigation.
+
+    During an active meal-entry session, show an explicit finish action so
+    the selected meal can stay active across multiple added products.
+    """
+    rows = [
+        [
+            KeyboardButton(text=MEAL_LABELS["breakfast"]),
+            KeyboardButton(text=MEAL_LABELS["lunch"]),
+        ],
+        [
+            KeyboardButton(text=MEAL_LABELS["dinner"]),
+            KeyboardButton(text=MEAL_LABELS["snack"]),
+        ],
+    ]
+    if adding:
+        rows.append([KeyboardButton(text=FINISH_DIARY_ADDING_TEXT)])
+    rows.extend(
+        [
             [KeyboardButton(text="📋 Дневник за сегодня")],
             [KeyboardButton(text="📚 Каталог продуктов")],
             [KeyboardButton(text="↩️ Главное меню")],
-        ],
-        resize_keyboard=True,
+        ]
     )
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def diary_portion_keyboard() -> ReplyKeyboardMarkup:
@@ -42,6 +52,7 @@ def diary_portion_keyboard() -> ReplyKeyboardMarkup:
     ]
     if len(labels) % 2:
         rows.append([KeyboardButton(text=labels[-1])])
+    rows.append([KeyboardButton(text=FINISH_DIARY_ADDING_TEXT)])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,
