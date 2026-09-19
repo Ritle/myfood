@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from app.repositories.water_entries import (
     list_water_entries,
     save_water_entry,
 )
-from app.services.diary import utc_day_bounds
+from app.services.days import resolve_diary_day_bounds
 
 MIN_WATER_ML = 1
 MAX_WATER_ML = 10000
@@ -56,16 +56,14 @@ async def add_water(
 
 
 async def get_water_for_day(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    day: date,
-    timezone_name: str,
-    day_boundary_time: time = time.min,
+    session: AsyncSession, *, user_id: int, day: date, timezone_name: str
 ) -> list[WaterEntry]:
-    """Load water entries for one user-defined logical day."""
-    start_at, end_at = utc_day_bounds(
-        day, timezone_name, day_boundary_time=day_boundary_time
+    """Load water entries using manual day bounds when they exist."""
+    start_at, end_at = await resolve_diary_day_bounds(
+        session,
+        user_id=user_id,
+        day=day,
+        timezone_name=timezone_name,
     )
     return await list_water_entries(
         session, user_id=user_id, start_at=start_at, end_at=end_at
