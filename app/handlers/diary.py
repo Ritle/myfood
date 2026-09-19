@@ -314,7 +314,8 @@ async def cancel_food_batch(callback: CallbackQuery, state: FSMContext) -> None:
         except TelegramAPIError:
             pass
         await callback.message.answer(
-            "Список отменён. Введите продукты заново.", reply_markup=diary_menu()
+            "Список отменён. Введите продукты заново.",
+            reply_markup=diary_menu(adding=True),
         )
     await callback.answer("Отменено")
 
@@ -756,8 +757,15 @@ async def enter_portion_weight(
         user = await ensure_user(session, message.from_user)
         food = await load_food(session, user_id=user.id, food_id=data["food_id"])
         if food is None:
-            await state.clear()
-            await message.answer("Продукт больше недоступен.", reply_markup=diary_menu())
+            meal_type = data.get("meal_type")
+            if meal_type in MEAL_LABELS:
+                await continue_diary_addition(state, meal_type)
+            else:
+                await state.clear()
+            await message.answer(
+                "Продукт больше недоступен. Выберите другой.",
+                reply_markup=diary_menu(adding=meal_type in MEAL_LABELS),
+            )
             return
         previous_entries = await today_entries(session, user)
         previous_total = summarize_entries(previous_entries).calories
@@ -870,7 +878,7 @@ async def save_entry_edit(
     await message.answer(
         f"Запись обновлена: {format_decimal(entry.weight_grams)} г, "
         f"{format_decimal(entry.calories)} ккал.",
-        reply_markup=diary_menu(adding=True),
+        reply_markup=diary_menu(),
     )
     await deliver_calorie_alert(message, alert, settings, session_factory)
 
