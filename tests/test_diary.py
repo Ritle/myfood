@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 import pytest
@@ -12,6 +12,7 @@ from app.services.diary import (
     add_diary_entry,
     calculate_portion,
     get_entries_for_day,
+    local_today,
     remove_diary_entry,
     resize_diary_entry,
     suggest_meal_type,
@@ -121,6 +122,29 @@ def test_utc_day_bounds_use_user_timezone() -> None:
 
     assert start == datetime(2026, 9, 11, 21, tzinfo=UTC)
     assert end == datetime(2026, 9, 12, 21, tzinfo=UTC)
+
+
+def test_custom_day_boundary_shifts_logical_day_and_bounds() -> None:
+    boundary = time(3)
+
+    assert local_today(
+        "Europe/Moscow",
+        day_boundary_time=boundary,
+        now=datetime(2026, 9, 19, 22, 30, tzinfo=UTC),
+    ) == date(2026, 9, 19)
+    assert local_today(
+        "Europe/Moscow",
+        day_boundary_time=boundary,
+        now=datetime(2026, 9, 20, 0, 0, tzinfo=UTC),
+    ) == date(2026, 9, 20)
+
+    start, end = utc_day_bounds(
+        date(2026, 9, 19),
+        "Europe/Moscow",
+        day_boundary_time=boundary,
+    )
+    assert start == datetime(2026, 9, 19, 0, 0, tzinfo=UTC)
+    assert end == datetime(2026, 9, 20, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
