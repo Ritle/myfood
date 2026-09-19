@@ -56,7 +56,7 @@ async def show_history(
     await state.clear()
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
-        day = local_today(user.timezone)
+        day = local_today(user.timezone, day_boundary_time=user.day_boundary_time)
         text, keyboard = await build_history_page(session, user=user, day=day, page=0)
     await message.answer(text, reply_markup=keyboard)
     await message.answer("Главное меню", reply_markup=main_menu())
@@ -73,7 +73,7 @@ async def change_history_day(
         return
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
-        if day > local_today(user.timezone):
+        if day > local_today(user.timezone, day_boundary_time=user.day_boundary_time):
             await callback.answer("Будущий день пока недоступен", show_alert=True)
             return
         text, keyboard = await build_history_page(session, user=user, day=day, page=0)
@@ -107,7 +107,7 @@ async def select_history_date(
         return
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
-        if day > local_today(user.timezone):
+        if day > local_today(user.timezone, day_boundary_time=user.day_boundary_time):
             await message.answer("Будущая дата пока недоступна.")
             return
         text, keyboard = await build_history_page(session, user=user, day=day, page=0)
@@ -133,7 +133,7 @@ async def change_history_page(
         return
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
-        if day > local_today(user.timezone):
+        if day > local_today(user.timezone, day_boundary_time=user.day_boundary_time):
             await callback.answer("Будущий день пока недоступен", show_alert=True)
             return
         text, keyboard = await build_history_page(
@@ -180,7 +180,11 @@ async def request_repeat_meal(
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         entries = await get_entries_for_day(
-            session, user_id=user.id, day=day, timezone_name=user.timezone
+            session,
+            user_id=user.id,
+            day=day,
+            timezone_name=user.timezone,
+            day_boundary_time=user.day_boundary_time,
         )
     count = sum(entry.meal_type == meal_type for entry in entries)
     if count == 0:
@@ -216,7 +220,11 @@ async def request_save_meal_template(
             )
             return
         entries = await get_entries_for_day(
-            session, user_id=user.id, day=day, timezone_name=user.timezone
+            session,
+            user_id=user.id,
+            day=day,
+            timezone_name=user.timezone,
+            day_boundary_time=user.day_boundary_time,
         )
         meal_entries = [entry for entry in entries if entry.meal_type == meal_type]
         if not meal_entries:
@@ -372,6 +380,7 @@ async def confirm_repeat_meal(
             source_day=day,
             meal_type=meal_type,
             timezone_name=user.timezone,
+            day_boundary_time=user.day_boundary_time,
         )
         current = await current_day_entries(session, user)
         alert = await claim_repeat_alert(
@@ -422,7 +431,7 @@ async def build_history_page(
     )
     keyboard = history_keyboard(
         day=day,
-        today=local_today(user.timezone),
+        today=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
         visible_entries=visible,
         all_entries=entries,
         page=actual_page,
@@ -464,8 +473,9 @@ async def current_day_entries(session: AsyncSession, user: User) -> list[FoodEnt
     return await get_entries_for_day(
         session,
         user_id=user.id,
-        day=local_today(user.timezone),
+        day=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
         timezone_name=user.timezone,
+        day_boundary_time=user.day_boundary_time,
     )
 
 
@@ -483,7 +493,7 @@ async def claim_repeat_alert(
     return await claim_calorie_alert(
         session,
         user_id=user.id,
-        local_date=local_today(user.timezone),
+        local_date=local_today(user.timezone, day_boundary_time=user.day_boundary_time),
         previous_total=summarize_entries(previous).calories,
         current_total=summarize_entries(current).calories,
         target=Decimal(user.daily_calorie_target),
