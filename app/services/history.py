@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,18 +32,13 @@ async def repeat_meal(
     source_day: date,
     meal_type: str,
     timezone_name: str,
-    day_boundary_time: time = time.min,
     eaten_at: datetime | None = None,
 ) -> list[FoodEntry]:
     """Copy all snapshots from one owned meal into the current diary."""
     if meal_type not in MEAL_TYPES:
         raise ValueError("unknown meal type")
     entries = await get_entries_for_day(
-        session,
-        user_id=user_id,
-        day=source_day,
-        timezone_name=timezone_name,
-        day_boundary_time=day_boundary_time,
+        session, user_id=user_id, day=source_day, timezone_name=timezone_name
     )
     timestamp = eaten_at or datetime.now(UTC)
     copies = [clone_entry(entry, eaten_at=timestamp) for entry in entries if entry.meal_type == meal_type]
