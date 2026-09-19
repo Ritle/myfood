@@ -28,4 +28,4 @@ jobs:
       - name: Apply migrations to an empty database
         run: alembic upgrade head
       - name: Verify migration head
-        run: test "$(alembic current 2>/dev/null)" = "0014_add_user_day_boundary (head)"
+        run: test "$(alembic current 2>/dev/null)" = "0014_create_diary_days (head)"
