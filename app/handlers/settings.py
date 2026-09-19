@@ -18,6 +18,7 @@ from app.services.notification_settings import (
     set_movement_interval,
     set_notification_time,
     set_time_range,
+    set_user_day_boundary,
     set_user_timezone,
     set_water_interval,
     toggle_notification_setting,
@@ -36,6 +37,11 @@ EDIT_PROMPTS = {
     "water_window": "Введите активные часы воды, например 09:00-21:00:",
     "quiet": "Введите тихие часы, например 22:00-08:00:",
     "timezone": "Введите часовой пояс IANA, например Europe/Moscow:",
+    "day_boundary": (
+        "Введите время начала нового дня в формате ЧЧ:ММ.\n"
+        "Например, 03:00: всё, что записано с 00:00 до 02:59, "
+        "останется в предыдущем дне."
+    ),
 }
 
 
@@ -53,7 +59,9 @@ async def show_settings(
         settings = await load_notification_settings(session, user_id=user.id)
     await message.answer(
         format_notification_settings(user, settings),
-        reply_markup=notification_settings_keyboard(settings, user.timezone),
+        reply_markup=notification_settings_keyboard(
+                settings, user.timezone, user.day_boundary_time
+            ),
     )
     await message.answer("Главное меню остается доступно ниже.", reply_markup=main_menu())
 
@@ -74,7 +82,9 @@ async def toggle_setting(
     if callback.message is not None:
         await callback.message.edit_text(
             format_notification_settings(user, settings),
-            reply_markup=notification_settings_keyboard(settings, user.timezone),
+            reply_markup=notification_settings_keyboard(
+                settings, user.timezone, user.day_boundary_time
+            ),
         )
     await callback.answer("Настройка сохранена")
 
@@ -106,7 +116,13 @@ async def save_setting_edit(
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
         settings = await load_notification_settings(session, user_id=user.id)
-        if name in TIME_FIELDS:
+        if name == "day_boundary":
+            value = parse_clock(message.text)
+            if value is None:
+                await message.answer("Введите корректное время в формате ЧЧ:ММ, например 03:00.")
+                return
+            user = await set_user_day_boundary(session, user=user, value=value)
+        elif name in TIME_FIELDS:
             value = parse_clock(message.text)
             if value is None:
                 await message.answer("Введите корректное время в формате ЧЧ:ММ, например 09:30.")
@@ -163,7 +179,9 @@ async def save_setting_edit(
     await state.clear()
     await message.answer(
         f"Настройка сохранена.\n\n{format_notification_settings(user, settings)}",
-        reply_markup=notification_settings_keyboard(settings, user.timezone),
+        reply_markup=notification_settings_keyboard(
+                settings, user.timezone, user.day_boundary_time
+            ),
     )
     await message.answer("Главное меню", reply_markup=main_menu())
 
@@ -183,6 +201,7 @@ def format_notification_settings(user: User, settings: NotificationSettings) -> 
     return (
         "⚙️ Настройки уведомлений\n\n"
         f"Часовой пояс: {user.timezone}\n"
+        f"Новый день начинается: {clock(user.day_boundary_time)}\n"
         f"Еда: {enabled(settings.meal_reminders_enabled)}\n"
         f"  Завтрак {clock(settings.breakfast_time)}, обед {clock(settings.lunch_time)}, "
         f"ужин {clock(settings.dinner_time)}\n"
