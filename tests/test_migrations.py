@@ -38,8 +38,11 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         food_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(foods)").fetchall()
         }
+        user_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
 
-    assert revision == ("0013_add_food_catalog_section",)
+    assert revision == ("0014_add_user_day_boundary",)
     assert {
         "users",
         "foods",
@@ -57,3 +60,4 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "movement_interval_minutes",
     } <= notification_columns
     assert "catalog_section" in food_columns
+    assert "day_boundary_time" in user_columns
