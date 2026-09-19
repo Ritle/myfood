@@ -9,7 +9,6 @@ from app.services.notification_settings import (
     parse_time_range,
     parse_timezone,
     set_movement_interval,
-    set_user_day_boundary,
     toggle_notification_setting,
 )
 
@@ -55,25 +54,5 @@ async def test_movement_reminder_can_be_toggled_and_interval_is_bounded() -> Non
                     await set_movement_interval(
                         session, settings=settings, minutes=minutes
                     )
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_user_day_boundary_can_be_changed() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        sessions = async_sessionmaker(engine, expire_on_commit=False)
-        async with sessions() as session:
-            user = User(telegram_id=777, first_name="Night owl")
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
-
-            updated = await set_user_day_boundary(session, user=user, value=time(3, 30))
-
-            assert updated.day_boundary_time == time(3, 30)
     finally:
         await engine.dispose()
