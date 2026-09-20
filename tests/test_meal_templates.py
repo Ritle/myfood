@@ -125,3 +125,38 @@ def test_template_controls_are_attached_to_history_and_diary() -> None:
         for button in row
     }
     assert "diary:source:templates:breakfast" in diary_callbacks
+
+
+@pytest.mark.asyncio
+async def test_template_keeps_full_dish_as_one_serving() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=401, first_name="Owner")
+            dish = make_food("Паста")
+            dish.catalog_section = "dish"
+            dish.nutrition_basis = "portion"
+            session.add_all([owner, dish])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(dish)
+
+            template = await create_meal_template(
+                session,
+                user_id=owner.id,
+                name="Готовый ужин",
+                meal_type="dinner",
+                items=[(dish, Decimal(350))],
+            )
+            loaded = await load_owned_meal_template(
+                session, user_id=owner.id, template_id=template.id
+            )
+
+            assert loaded is not None
+            assert loaded.items[0].is_full_serving is True
+            assert loaded.items[0].weight_grams == Decimal("1.00")
+    finally:
+        await engine.dispose()
