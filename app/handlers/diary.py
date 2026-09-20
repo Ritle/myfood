@@ -270,12 +270,21 @@ async def prepare_batch_confirmation(
         totals["fat"] += portion.fat
         totals["carbs"] += portion.carbs
         assumed_note = " (вес принят за 100 г)" if assumed_weight else ""
-        has_assumed_weights = has_assumed_weights or assumed_weight
-        product_label = f"{label} → {food.name}" if label != food.name else food.name
-        lines.append(
-            f"• {product_label} — {format_decimal(weight)} г"
-            f"{assumed_note} · {format_decimal(portion.calories)} ккал"
+        has_assumed_weights = (
+            has_assumed_weights
+            or (assumed_weight and food.nutrition_basis != "portion")
         )
+        product_label = f"{label} → {food.name}" if label != food.name else food.name
+        if food.nutrition_basis == "portion":
+            lines.append(
+                f"• {product_label} — 1 порция · "
+                f"{format_decimal(portion.calories)} ккал"
+            )
+        else:
+            lines.append(
+                f"• {product_label} — {format_decimal(weight)} г"
+                f"{assumed_note} · {format_decimal(portion.calories)} ккал"
+            )
         state_items.append(
             {
                 "food_id": food.id,
@@ -708,9 +717,12 @@ async def ignore_diary_page_counter(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("diary:add:"))
 async def select_diary_food(
-    callback: CallbackQuery, state: FSMContext, session_factory: async_sessionmaker
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    settings: Settings,
 ) -> None:
-    """Select a visible product and ask for portion weight."""
+    """Add a whole dish immediately or ask for a product portion weight."""
     if callback.data is None:
         return
     try:
@@ -722,8 +734,47 @@ async def select_diary_food(
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         food = await load_food(session, user_id=user.id, food_id=food_id)
+        if food is not None and meal_type in MEAL_LABELS and food.nutrition_basis == "portion":
+            previous_entries = await today_entries(session, user)
+            previous_total = summarize_entries(previous_entries).calories
+            entry = await add_diary_entry(
+                session,
+                user_id=user.id,
+                food=food,
+                meal_type=meal_type,
+                weight_grams=Decimal(1),
+            )
+            entries = await today_entries(session, user)
+            alert = await claim_alert_for_change(
+                session,
+                user=user,
+                previous_total=previous_total,
+                current_total=summarize_entries(entries).calories,
+                settings=settings,
+            )
+        else:
+            entry = None
+            entries = []
+            alert = None
     if food is None or meal_type not in MEAL_LABELS:
         await callback.answer("Продукт недоступен", show_alert=True)
+        return
+    if entry is not None:
+        await continue_diary_addition(state, meal_type)
+        if callback.message is not None:
+            await callback.message.answer(
+                f"Добавлено блюдо целиком: {food.name}\n"
+                f"{format_decimal(entry.calories)} ккал · "
+                f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
+                f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
+                f"Добавьте следующую позицию в «{MEAL_LABELS[meal_type]}» "
+                "или нажмите «✅ Завершить добавление».",
+                reply_markup=diary_menu(adding=True),
+            )
+            await deliver_calorie_alert(
+                callback.message, alert, settings, session_factory
+            )
+        await callback.answer("Блюдо добавлено")
         return
     await state.set_state(DiaryAdd.weight)
     await state.update_data(food_id=food_id, meal_type=meal_type)
@@ -787,7 +838,11 @@ async def enter_portion_weight(
     meal_type = data["meal_type"]
     await continue_diary_addition(state, meal_type)
     await message.answer(
-        f"Добавлено: {food.name}, {format_decimal(entry.weight_grams)} г\n"
+        (
+            f"Добавлено: {food.name}, 1 порция\n"
+            if entry.is_full_serving
+            else f"Добавлено: {food.name}, {format_decimal(entry.weight_grams)} г\n"
+        )
         f"{format_decimal(entry.calories)} ккал · "
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
@@ -827,6 +882,12 @@ async def begin_entry_edit(
         entry = await load_owned_entry(session, user_id=user.id, entry_id=entry_id)
     if entry is None:
         await callback.answer("Запись недоступна", show_alert=True)
+        return
+    if entry.is_full_serving:
+        await callback.answer(
+            "Готовое блюдо учитывается целиком; вес для него не изменяется.",
+            show_alert=True,
+        )
         return
     await state.set_state(DiaryEdit.weight)
     await state.update_data(entry_id=entry_id)
