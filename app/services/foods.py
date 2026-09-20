@@ -64,9 +64,14 @@ def validate_food_name(value: str, *, field: str = "Название", maximum_l
     return cleaned
 
 
-def validate_nutrient(value: Decimal, *, calories: bool = False) -> Decimal:
-    """Validate a finite per-100-gram nutrient value."""
-    maximum = Decimal(1000) if calories else Decimal(100)
+def validate_nutrient(
+    value: Decimal, *, calories: bool = False, full_serving: bool = False
+) -> Decimal:
+    """Validate a finite nutrient value for either 100 g or one full serving."""
+    if full_serving:
+        maximum = Decimal(10000) if calories else Decimal(1000)
+    else:
+        maximum = Decimal(1000) if calories else Decimal(100)
     if not value.is_finite() or value < 0 or value > maximum:
         raise ValueError(f"значение должно быть от 0 до {maximum}")
     return value.quantize(Decimal("0.01"))
@@ -87,6 +92,7 @@ async def add_user_food(
     """Validate and add a private product or dish owned by one user."""
     if catalog_section not in {"food", "dish"}:
         raise ValueError("Неизвестный раздел каталога")
+    nutrition_basis = "portion" if catalog_section == "dish" else "per_100g"
     clean_name = validate_food_name(name)
     clean_brand = validate_food_name(brand, field="Бренд", maximum_length=120) if brand else None
     return await create_food(
@@ -96,13 +102,22 @@ async def add_user_food(
             name_normalized=normalize_food_text(clean_name),
             brand=clean_brand,
             brand_normalized=normalize_food_text(clean_brand) if clean_brand else None,
-            calories_per_100g=validate_nutrient(calories, calories=True),
-            protein_per_100g=validate_nutrient(protein),
-            fat_per_100g=validate_nutrient(fat),
-            carbs_per_100g=validate_nutrient(carbs),
+            calories_per_100g=validate_nutrient(
+                calories, calories=True, full_serving=nutrition_basis == "portion"
+            ),
+            protein_per_100g=validate_nutrient(
+                protein, full_serving=nutrition_basis == "portion"
+            ),
+            fat_per_100g=validate_nutrient(
+                fat, full_serving=nutrition_basis == "portion"
+            ),
+            carbs_per_100g=validate_nutrient(
+                carbs, full_serving=nutrition_basis == "portion"
+            ),
             created_by_user_id=user_id,
             is_public=False,
             catalog_section=catalog_section,
+            nutrition_basis=nutrition_basis,
         ),
     )
 
@@ -205,7 +220,11 @@ async def update_user_food(
     elif field in {"calories", "protein", "fat", "carbs"}:
         if not isinstance(value, Decimal):
             raise ValueError("Пищевая ценность должна быть числом")
-        nutrient = validate_nutrient(value, calories=field == "calories")
+        nutrient = validate_nutrient(
+            value,
+            calories=field == "calories",
+            full_serving=food.nutrition_basis == "portion",
+        )
         attribute = {
             "calories": "calories_per_100g",
             "protein": "protein_per_100g",
