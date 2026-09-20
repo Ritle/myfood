@@ -18,7 +18,7 @@ from app.models.base import Base
 
 
 class Food(Base):
-    """A public or user-owned product with nutrients specified per 100 grams."""
+    """A public or user-owned catalog item with per-100g or full-serving nutrients."""
 
     __tablename__ = "foods"
     __table_args__ = (UniqueConstraint("source", "source_ref", name="uq_foods_source_source_ref"),)
@@ -41,6 +41,9 @@ class Food(Base):
     source_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     catalog_section: Mapped[str] = mapped_column(
         String(16), default="food", server_default="food", index=True
+    )
+    nutrition_basis: Mapped[str] = mapped_column(
+        String(16), default="per_100g", server_default="per_100g", index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

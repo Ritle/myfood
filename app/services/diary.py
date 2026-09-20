@@ -50,9 +50,13 @@ class DiarySummary:
 
 
 def calculate_portion(food: Food, weight_grams: Decimal) -> PortionNutrition:
-    """Calculate and round a portion from per-100-gram product values."""
+    """Calculate nutrition for a weighed product or return one whole dish."""
     validate_portion_weight(weight_grams)
-    factor = weight_grams / Decimal(100)
+    factor = (
+        Decimal(1)
+        if food.nutrition_basis == "portion"
+        else weight_grams / Decimal(100)
+    )
     return PortionNutrition(
         calories=round_nutrient(food.calories_per_100g * factor),
         protein=round_nutrient(food.protein_per_100g * factor),
@@ -113,13 +117,16 @@ async def add_diary_entry(
     if meal_type not in MEAL_TYPES:
         raise ValueError("unknown meal type")
     portion = calculate_portion(food, weight_grams)
+    is_full_serving = food.nutrition_basis == "portion"
+    stored_weight = Decimal(1) if is_full_serving else weight_grams
     return await create_food_entry(
         session,
         FoodEntry(
             user_id=user_id,
             food_id=food.id,
             meal_type=meal_type,
-            weight_grams=weight_grams.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
+            weight_grams=stored_weight.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
+            is_full_serving=is_full_serving,
             calories=portion.calories,
             protein=portion.protein,
             fat=portion.fat,
@@ -146,12 +153,15 @@ async def add_diary_entries(
     entries = []
     for food, weight_grams in items:
         portion = calculate_portion(food, weight_grams)
+        is_full_serving = food.nutrition_basis == "portion"
+        stored_weight = Decimal(1) if is_full_serving else weight_grams
         entries.append(
             FoodEntry(
                 user_id=user_id,
                 food_id=food.id,
                 meal_type=meal_type,
-                weight_grams=weight_grams.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
+                weight_grams=stored_weight.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
+                is_full_serving=is_full_serving,
                 calories=portion.calories,
                 protein=portion.protein,
                 fat=portion.fat,
@@ -187,6 +197,8 @@ async def resize_diary_entry(
     entry = await get_owned_food_entry(session, entry_id=entry_id, user_id=user_id)
     if entry is None:
         return None
+    if entry.is_full_serving:
+        raise ValueError("Вес готового блюда не изменяется: оно учитывается целиком")
     factor = new_weight_grams / entry.weight_grams
     entry.weight_grams = new_weight_grams.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP)
     entry.calories = round_nutrient(entry.calories * factor)

@@ -38,15 +38,32 @@ router = Router()
 
 EDITABLE_FOOD_FIELDS = {"name", "brand", "calories", "protein", "fat", "carbs"}
 NUTRIENT_EDIT_FIELDS = {
-    "calories": (Decimal(1000), "калории на 100 г", "calories_per_100g"),
-    "protein": (Decimal(100), "белки на 100 г", "protein_per_100g"),
-    "fat": (Decimal(100), "жиры на 100 г", "fat_per_100g"),
-    "carbs": (Decimal(100), "углеводы на 100 г", "carbs_per_100g"),
+    "calories": "calories_per_100g",
+    "protein": "protein_per_100g",
+    "fat": "fat_per_100g",
+    "carbs": "carbs_per_100g",
 }
 
 
+def nutrient_limit(field: str, nutrition_basis: str) -> Decimal:
+    if nutrition_basis == "portion":
+        return Decimal(10000) if field == "calories" else Decimal(1000)
+    return Decimal(1000) if field == "calories" else Decimal(100)
+
+
+def nutrient_label(field: str, nutrition_basis: str) -> str:
+    base = {
+        "calories": "калории",
+        "protein": "белки",
+        "fat": "жиры",
+        "carbs": "углеводы",
+    }[field]
+    suffix = "на всё блюдо" if nutrition_basis == "portion" else "на 100 г"
+    return f"{base} {suffix}"
+
+
 def food_card_text(food) -> str:
-    """Format a product card with its per-100-gram nutrition."""
+    """Format a product or full-serving dish card."""
     brand = f"\nБренд: {food.brand}" if food.brand else ""
     source_name = {
         "USDA_FDC": "USDA FoodData Central Foundation Foods",
@@ -63,8 +80,9 @@ def food_card_text(food) -> str:
         else ""
     )
     section = "\nРаздел: блюда" if food.catalog_section == "dish" else ""
+    nutrition_title = "На всё блюдо:" if food.nutrition_basis == "portion" else "На 100 г:"
     return (
-        f"{food.name}{brand}\n\nНа 100 г:\n"
+        f"{food.name}{brand}\n\n{nutrition_title}\n"
         f"{format_decimal(food.calories_per_100g)} ккал\n"
         f"Б: {format_decimal(food.protein_per_100g)} г\n"
         f"Ж: {format_decimal(food.fat_per_100g)} г\n"
@@ -397,26 +415,33 @@ async def begin_food_field_edit(
     labels = {
         "name": "название",
         "brand": "бренд",
-        **{key: value[1] for key, value in NUTRIENT_EDIT_FIELDS.items()},
+        **{
+            key: nutrient_label(key, food.nutrition_basis)
+            for key in NUTRIENT_EDIT_FIELDS
+        },
     }
     current = {
         "name": food.name,
         "brand": food.brand or "не указан",
         **{
             key: format_decimal(getattr(food, attribute))
-            for key, (_, _, attribute) in NUTRIENT_EDIT_FIELDS.items()
+            for key, attribute in NUTRIENT_EDIT_FIELDS.items()
         },
     }[field]
     if field == "brand":
         instruction = "Введите новый бренд или «Без бренда», чтобы очистить поле."
     elif field in NUTRIENT_EDIT_FIELDS:
-        maximum = NUTRIENT_EDIT_FIELDS[field][0]
+        maximum = nutrient_limit(field, food.nutrition_basis)
         instruction = f"Введите число от 0 до {format_decimal(maximum)}."
     else:
         instruction = "Введите новое название."
 
     await state.set_state(FoodEdit.value)
-    await state.update_data(food_id=food.id, field=field)
+    await state.update_data(
+        food_id=food.id,
+        field=field,
+        nutrition_basis=food.nutrition_basis,
+    )
     if callback.message is not None:
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer(
@@ -487,7 +512,9 @@ async def save_food_field_edit(
                 else validate_food_name(raw, field="Бренд", maximum_length=120)
             )
         else:
-            maximum = NUTRIENT_EDIT_FIELDS[field][0]
+            maximum = nutrient_limit(
+                field, str(data.get("nutrition_basis", "per_100g"))
+            )
             parsed = parse_decimal(raw)
             if parsed is None or not Decimal(0) <= parsed <= maximum:
                 await message.answer(
@@ -564,7 +591,14 @@ async def enter_food_brand(message: Message, state: FSMContext) -> None:
             return
     await state.update_data(brand=brand)
     await state.set_state(FoodCreation.calories)
-    await message.answer("Введите калории на 100 г (0–1000):", reply_markup=ReplyKeyboardRemove())
+    data = await state.get_data()
+    is_dish = data.get("catalog_section") == "dish"
+    prompt = (
+        "Введите калории на всё блюдо (0–10000):"
+        if is_dish
+        else "Введите калории на 100 г (0–1000):"
+    )
+    await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
 
 
 async def collect_nutrient(
@@ -587,37 +621,55 @@ async def collect_nutrient(
 
 @router.message(FoodCreation.calories)
 async def enter_food_calories(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    is_dish = data.get("catalog_section") == "dish"
     await collect_nutrient(
         message,
         state,
         field="calories",
-        maximum=Decimal(1000),
+        maximum=Decimal(10000) if is_dish else Decimal(1000),
         next_state=FoodCreation.protein,
-        prompt="Введите белки на 100 г (0–100):",
+        prompt=(
+            "Введите белки на всё блюдо (0–1000):"
+            if is_dish
+            else "Введите белки на 100 г (0–100):"
+        ),
     )
 
 
 @router.message(FoodCreation.protein)
 async def enter_food_protein(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    is_dish = data.get("catalog_section") == "dish"
     await collect_nutrient(
         message,
         state,
         field="protein",
-        maximum=Decimal(100),
+        maximum=Decimal(1000) if is_dish else Decimal(100),
         next_state=FoodCreation.fat,
-        prompt="Введите жиры на 100 г (0–100):",
+        prompt=(
+            "Введите жиры на всё блюдо (0–1000):"
+            if is_dish
+            else "Введите жиры на 100 г (0–100):"
+        ),
     )
 
 
 @router.message(FoodCreation.fat)
 async def enter_food_fat(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    is_dish = data.get("catalog_section") == "dish"
     await collect_nutrient(
         message,
         state,
         field="fat",
-        maximum=Decimal(100),
+        maximum=Decimal(1000) if is_dish else Decimal(100),
         next_state=FoodCreation.carbs,
-        prompt="Введите углеводы на 100 г (0–100):",
+        prompt=(
+            "Введите углеводы на всё блюдо (0–1000):"
+            if is_dish
+            else "Введите углеводы на 100 г (0–100):"
+        ),
     )
 
 
@@ -625,13 +677,15 @@ async def enter_food_fat(message: Message, state: FSMContext) -> None:
 async def enter_food_carbs(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
+    data = await state.get_data()
+    is_dish = data.get("catalog_section") == "dish"
+    maximum = Decimal(1000) if is_dish else Decimal(100)
     carbs = parse_decimal(message.text)
-    if carbs is None or not Decimal(0) <= carbs <= Decimal(100):
-        await message.answer("Введите число от 0 до 100.")
+    if carbs is None or not Decimal(0) <= carbs <= maximum:
+        await message.answer(f"Введите число от 0 до {format_decimal(maximum)}.")
         return
     if message.from_user is None:
         return
-    data = await state.get_data()
     catalog_section = data.get("catalog_section", "food")
     if catalog_section not in {"food", "dish"}:
         await state.clear()
@@ -658,6 +712,11 @@ async def enter_food_carbs(
     await state.clear()
     kind = "Блюдо" if catalog_section == "dish" else "Продукт"
     await message.answer(
-        f"{kind} «{product.name}» сохранен в вашем каталоге.",
+        (
+            f"{kind} «{product.name}» сохранен в вашем каталоге. "
+            "При добавлении в питание блюдо будет учитываться целиком без ввода веса."
+            if catalog_section == "dish"
+            else f"{kind} «{product.name}» сохранен в вашем каталоге."
+        ),
         reply_markup=food_menu(),
     )

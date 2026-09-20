@@ -1,7 +1,18 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    false,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -27,6 +38,9 @@ class FoodEntry(Base):
     food_id: Mapped[int] = mapped_column(ForeignKey("foods.id", ondelete="RESTRICT"))
     meal_type: Mapped[str] = mapped_column(String(16))
     weight_grams: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    is_full_serving: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     calories: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     protein: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     fat: Mapped[Decimal] = mapped_column(Numeric(10, 2))

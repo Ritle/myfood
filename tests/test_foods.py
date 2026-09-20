@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
 from app.data.health_diet import load_health_diet_foods
-from app.handlers.food import answer_food_card
+from app.handlers.food import answer_food_card, food_card_text
 from app.keyboards.diary import diary_recent_food_results
 from app.keyboards.food import food_card_actions, food_results
 from app.models import Base, Food, User
@@ -121,6 +121,8 @@ async def test_private_food_is_visible_only_to_owner() -> None:
             owner_dish_page = await dish_catalog_page(session, user_id=owner.id, page=10_000)
             stranger_dish_page = await dish_catalog_page(session, user_id=stranger.id, page=10_000)
             assert dish in owner_dish_page.items
+            assert dish.nutrition_basis == "portion"
+            assert "На всё блюдо:" in food_card_text(dish)
             assert dish in await search_foods(session, user_id=owner.id, query="лазанья")
             assert dish not in stranger_dish_page.items
             food_button = food_results([food]).inline_keyboard[0][0]
