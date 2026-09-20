@@ -695,13 +695,13 @@ async def repeat_recent_food_portion(
         )
     except TelegramAPIError:
         pass
+    amount = (
+        "1 порция"
+        if entry.is_full_serving
+        else f"{format_decimal(entry.weight_grams)} г"
+    )
     await callback.message.answer(
-        (
-            f"Повторно добавлено: {previous_entry.food.name}, 1 порция\n"
-            if entry.is_full_serving
-            else f"Повторно добавлено: {previous_entry.food.name}, "
-            f"{format_decimal(entry.weight_grams)} г\n"
-        )
+        f"Повторно добавлено: {previous_entry.food.name}, {amount}\n"
         f"{format_decimal(entry.calories)} ккал · "
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
@@ -841,12 +841,13 @@ async def enter_portion_weight(
         )
     meal_type = data["meal_type"]
     await continue_diary_addition(state, meal_type)
+    amount = (
+        "1 порция"
+        if entry.is_full_serving
+        else f"{format_decimal(entry.weight_grams)} г"
+    )
     await message.answer(
-        (
-            f"Добавлено: {food.name}, 1 порция\n"
-            if entry.is_full_serving
-            else f"Добавлено: {food.name}, {format_decimal(entry.weight_grams)} г\n"
-        )
+        f"Добавлено: {food.name}, {amount}\n"
         f"{format_decimal(entry.calories)} ккал · "
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
