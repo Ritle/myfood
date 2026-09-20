@@ -164,9 +164,13 @@ async def request_repeat_entry(
         await callback.answer("Запись недоступна", show_alert=True)
         return
     if callback.message is not None:
+        amount = (
+            "1 порцию"
+            if entry.is_full_serving
+            else f"{format_decimal(entry.weight_grams)} г"
+        )
         await callback.message.answer(
-            f"Повторить сегодня «{entry.food.name}», "
-            f"{format_decimal(entry.weight_grams)} г?",
+            f"Повторить сегодня «{entry.food.name}», {amount}?",
             reply_markup=repeat_entry_confirmation(entry.id),
         )
     await callback.answer()
@@ -243,7 +247,11 @@ async def request_save_meal_template(
                 )
                 return
             raw_items.append(
-                {"food_id": food.id, "weight_grams": str(entry.weight_grams)}
+                {
+                    "food_id": food.id,
+                    "weight_grams": str(entry.weight_grams),
+                    "is_full_serving": entry.is_full_serving,
+                }
             )
 
     await state.set_state(HistorySelect.template_name)
@@ -347,8 +355,12 @@ async def confirm_repeat_entry(
             await callback.message.answer("Запись больше недоступна.")
         else:
             await callback.message.answer(
-                f"Добавлено сегодня: {entry.food.name}, "
-                f"{format_decimal(entry.weight_grams)} г."
+                (
+                    f"Добавлено сегодня: {entry.food.name}, 1 порция."
+                    if entry.is_full_serving
+                    else f"Добавлено сегодня: {entry.food.name}, "
+                    f"{format_decimal(entry.weight_grams)} г."
+                )
             )
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
@@ -456,9 +468,13 @@ def format_history_day(
         lines.append("Нет записей.")
     else:
         for entry in visible_entries:
+            amount = (
+                "1 порция"
+                if entry.is_full_serving
+                else f"{format_decimal(entry.weight_grams)} г"
+            )
             lines.append(
-                f"• {MEAL_LABELS[entry.meal_type]} · {entry.food.name} — "
-                f"{format_decimal(entry.weight_grams)} г"
+                f"• {MEAL_LABELS[entry.meal_type]} · {entry.food.name} — {amount}"
             )
     if total_pages > 1:
         lines.append(f"Страница {page + 1} из {total_pages}")
