@@ -101,11 +101,19 @@ def diary_recent_food_results(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"{item.food.name[:32]} · изменить",
+                    text=(
+                        f"{item.food.name[:32]} · добавить"
+                        if item.food.nutrition_basis == "portion"
+                        else f"{item.food.name[:32]} · изменить"
+                    ),
                     callback_data=f"diary:add:{meal_type}:{item.food.id}",
                 ),
                 InlineKeyboardButton(
-                    text=f"↻ {format_decimal(item.weight_grams)} г",
+                    text=(
+                        "↻ 1 порция"
+                        if item.food.nutrition_basis == "portion"
+                        else f"↻ {format_decimal(item.weight_grams)} г"
+                    ),
                     callback_data=f"diary:repeat:{meal_type}:{item.entry_id}",
                 ),
             ]
@@ -210,14 +218,28 @@ def diary_entry_actions(entries: list[FoodEntry]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for entry in entries:
         short_name = entry.food.name[:24]
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"✏️ {short_name}", callback_data=f"diary:edit:{entry.id}"
-                ),
-                InlineKeyboardButton(text="🗑", callback_data=f"diary:delete:{entry.id}"),
-            ]
-        )
+        if entry.is_full_serving:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"🍽 {short_name}", callback_data="diary:noop"
+                    ),
+                    InlineKeyboardButton(
+                        text="🗑", callback_data=f"diary:delete:{entry.id}"
+                    ),
+                ]
+            )
+        else:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"✏️ {short_name}", callback_data=f"diary:edit:{entry.id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="🗑", callback_data=f"diary:delete:{entry.id}"
+                    ),
+                ]
+            )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
