@@ -354,14 +354,13 @@ async def confirm_repeat_entry(
         if entry is None:
             await callback.message.answer("Запись больше недоступна.")
         else:
-            await callback.message.answer(
-                (
-                    f"Добавлено сегодня: {entry.food.name}, 1 порция."
-                    if entry.is_full_serving
-                    else f"Добавлено сегодня: {entry.food.name}, "
-                    f"{format_decimal(entry.weight_grams)} г."
-                )
+            text = (
+                f"Добавлено сегодня: {entry.food.name}, 1 порция."
+                if entry.is_full_serving
+                else f"Добавлено сегодня: {entry.food.name}, "
+                f"{format_decimal(entry.weight_grams)} г."
             )
+            await callback.message.answer(text)
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
             )
