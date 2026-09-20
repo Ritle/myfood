@@ -59,6 +59,7 @@ def clone_entry(source: FoodEntry, *, eaten_at: datetime) -> FoodEntry:
         food=source.food,
         meal_type=source.meal_type,
         weight_grams=source.weight_grams,
+        is_full_serving=source.is_full_serving,
         calories=source.calories,
         protein=source.protein,
         fat=source.fat,
