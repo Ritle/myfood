@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -68,6 +70,9 @@ class MealTemplateItem(Base):
     )
     food_id: Mapped[int] = mapped_column(ForeignKey("foods.id", ondelete="RESTRICT"))
     weight_grams: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    is_full_serving: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     position: Mapped[int] = mapped_column(Integer)
 
     template: Mapped[MealTemplate] = relationship(back_populates="items")
