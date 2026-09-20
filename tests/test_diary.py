@@ -291,3 +291,56 @@ async def test_manual_day_keeps_after_midnight_entries_until_user_closes_it() ->
             assert [entry.meal_type for entry in entries] == ["dinner", "snack"]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_full_dish_is_added_as_one_serving_without_weight_scaling() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=777, first_name="Owner")
+            dish = Food(
+                name="Домашняя паста",
+                name_normalized="домашняя паста",
+                calories_per_100g=Decimal(620),
+                protein_per_100g=Decimal(32),
+                fat_per_100g=Decimal(18),
+                carbs_per_100g=Decimal(80),
+                catalog_section="dish",
+                nutrition_basis="portion",
+                created_by_user_id=1,
+                is_public=False,
+            )
+            session.add_all([owner, dish])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(dish)
+
+            portion = calculate_portion(dish, Decimal(250))
+            assert portion.calories == Decimal("620.00")
+            assert portion.protein == Decimal("32.00")
+
+            entry = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=dish,
+                meal_type="dinner",
+                weight_grams=Decimal(250),
+            )
+
+            assert entry.is_full_serving is True
+            assert entry.weight_grams == Decimal("1.00")
+            assert entry.calories == Decimal("620.00")
+            assert entry.protein == Decimal("32.00")
+            with pytest.raises(ValueError, match="учитывается целиком"):
+                await resize_diary_entry(
+                    session,
+                    user_id=owner.id,
+                    entry_id=entry.id,
+                    new_weight_grams=Decimal(200),
+                )
+    finally:
+        await engine.dispose()
