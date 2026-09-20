@@ -97,7 +97,12 @@ async def create_meal_template(
         meal_type=meal_type,
     )
     template.items = [
-        MealTemplateItem(food=food, weight_grams=weight, position=position)
+        MealTemplateItem(
+            food=food,
+            weight_grams=Decimal(1) if food.nutrition_basis == "portion" else weight,
+            is_full_serving=food.nutrition_basis == "portion",
+            position=position,
+        )
         for position, (food, weight) in enumerate(visible_items)
     ]
     session.add(template)
