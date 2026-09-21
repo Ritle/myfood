@@ -23,6 +23,8 @@ from app.services.days import get_or_create_active_diary_day
 from app.services.diary import (
     MEAL_LABELS,
     get_entries_for_day,
+    meal_label,
+    next_snack_number,
     load_owned_entry,
     summarize_entries,
 )
@@ -185,20 +187,26 @@ async def request_repeat_meal(
     if parsed is None:
         await callback.answer("Некорректный прием пищи", show_alert=True)
         return
-    day, meal_type = parsed
+    day, meal_type, snack_number = parsed
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         entries = await get_entries_for_day(
             session, user_id=user.id, day=day, timezone_name=user.timezone
         )
-    count = sum(entry.meal_type == meal_type for entry in entries)
+    count = sum(
+        entry_matches_meal_group(entry, meal_type, snack_number)
+        for entry in entries
+    )
     if count == 0:
         await callback.answer("Прием пищи больше недоступен", show_alert=True)
         return
     if callback.message is not None:
         await callback.message.answer(
-            f"Повторить сегодня {MEAL_LABELS[meal_type].lower()} ({count} поз.)?",
-            reply_markup=repeat_meal_confirmation(day, meal_type),
+            f"Повторить сегодня {meal_label(meal_type, snack_number).lower()} "
+            f"({count} поз.)?",
+            reply_markup=repeat_meal_confirmation(
+                day, meal_type, snack_number
+            ),
         )
     await callback.answer()
 
@@ -214,7 +222,7 @@ async def request_save_meal_template(
     if parsed is None or callback.message is None:
         await callback.answer("Некорректный прием пищи", show_alert=True)
         return
-    day, meal_type = parsed
+    day, meal_type, snack_number = parsed
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         if await count_user_meal_templates(session, user_id=user.id) >= MAX_MEAL_TEMPLATES:
@@ -227,7 +235,11 @@ async def request_save_meal_template(
         entries = await get_entries_for_day(
             session, user_id=user.id, day=day, timezone_name=user.timezone
         )
-        meal_entries = [entry for entry in entries if entry.meal_type == meal_type]
+        meal_entries = [
+            entry
+            for entry in entries
+            if entry_matches_meal_group(entry, meal_type, snack_number)
+        ]
         if not meal_entries:
             await callback.answer("Прием пищи больше недоступен", show_alert=True)
             return
@@ -260,7 +272,7 @@ async def request_save_meal_template(
         template_items=raw_items,
     )
     await callback.message.answer(
-        f"Введите название шаблона для «{MEAL_LABELS[meal_type]}» "
+        f"Введите название шаблона для «{meal_label(meal_type, snack_number)}» "
         "(от 2 до 50 символов). Отправьте /cancel, чтобы отменить."
     )
     await callback.answer()
@@ -345,7 +357,18 @@ async def confirm_repeat_entry(
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         previous = await current_day_entries(session, user)
-        entry = await repeat_food_entry(session, user_id=user.id, entry_id=entry_id)
+        source = await load_owned_entry(session, user_id=user.id, entry_id=entry_id)
+        target_snack_number = (
+            next_snack_number(previous)
+            if source is not None and source.meal_type == "snack"
+            else None
+        )
+        entry = await repeat_food_entry(
+            session,
+            user_id=user.id,
+            entry_id=entry_id,
+            snack_number=target_snack_number,
+        )
         current = await current_day_entries(session, user)
         alert = await claim_repeat_alert(
             session, user=user, previous=previous, current=current, settings=settings
@@ -378,16 +401,21 @@ async def confirm_repeat_meal(
     if parsed is None:
         await callback.answer("Некорректный прием пищи", show_alert=True)
         return
-    day, meal_type = parsed
+    day, meal_type, snack_number = parsed
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         previous = await current_day_entries(session, user)
+        target_snack_number = (
+            next_snack_number(previous) if meal_type == "snack" else None
+        )
         copies = await repeat_meal(
             session,
             user_id=user.id,
             source_day=day,
             meal_type=meal_type,
             timezone_name=user.timezone,
+            snack_number=snack_number,
+            target_snack_number=target_snack_number,
         )
         current = await current_day_entries(session, user)
         alert = await claim_repeat_alert(
@@ -398,7 +426,10 @@ async def confirm_repeat_meal(
             await callback.message.answer("Прием пищи больше недоступен.")
         else:
             await callback.message.answer(
-                f"{MEAL_LABELS[meal_type]} повторен: добавлено {len(copies)} поз."
+                (
+                    f"{meal_label(meal_type, target_snack_number)} повторен: "
+                    f"добавлено {len(copies)} поз."
+                )
             )
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
@@ -473,7 +504,8 @@ def format_history_day(
                 else f"{format_decimal(entry.weight_grams)} г"
             )
             lines.append(
-                f"• {MEAL_LABELS[entry.meal_type]} · {entry.food.name} — {amount}"
+                f"• {meal_label(entry.meal_type, entry.snack_number)} · "
+                f"{entry.food.name} — {amount}"
             )
     if total_pages > 1:
         lines.append(f"Страница {page + 1} из {total_pages}")
@@ -552,13 +584,33 @@ def parse_positive_id(data: str | None) -> int | None:
     return value if value > 0 else None
 
 
-def parse_meal_callback(data: str | None) -> tuple[date, str] | None:
-    """Parse a source date and meal type from callback data."""
+def parse_meal_callback(
+    data: str | None,
+) -> tuple[date, str, int | None] | None:
+    """Parse a source date, meal type, and optional numbered snack group."""
     try:
-        raw_day, meal_type = (data or "").rsplit(":", 2)[-2:]
+        raw_day, meal_type, raw_number = (data or "").rsplit(":", 3)[-3:]
         day = date.fromisoformat(raw_day)
+        number = int(raw_number)
     except ValueError:
         return None
     if meal_type not in MEAL_LABELS:
         return None
-    return day, meal_type
+    if meal_type == "snack":
+        if number < 1:
+            return None
+        snack_number: int | None = number
+    else:
+        snack_number = None
+    return day, meal_type, snack_number
+
+
+def entry_matches_meal_group(
+    entry: FoodEntry, meal_type: str, snack_number: int | None
+) -> bool:
+    """Return whether an entry belongs to one meal/snack history group."""
+    if entry.meal_type != meal_type:
+        return False
+    if meal_type != "snack":
+        return True
+    return (entry.snack_number or 1) == (snack_number or 1)
