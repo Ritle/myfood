@@ -426,10 +426,8 @@ async def confirm_repeat_meal(
             await callback.message.answer("Прием пищи больше недоступен.")
         else:
             await callback.message.answer(
-                (
-                    f"{meal_label(meal_type, target_snack_number)} повторен: "
-                    f"добавлено {len(copies)} поз."
-                )
+                f"{meal_label(meal_type, target_snack_number)} повторен: "
+                f"добавлено {len(copies)} поз."
             )
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
