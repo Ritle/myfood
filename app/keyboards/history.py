@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.models import FoodEntry
-from app.services.diary import MEAL_LABELS
+from app.services.diary import MEAL_LABELS, meal_label
 
 
 def history_keyboard(
@@ -69,23 +69,47 @@ def history_keyboard(
                 )
             ]
         )
-    present_meals = {entry.meal_type for entry in all_entries}
-    for meal_type, label in MEAL_LABELS.items():
-        if meal_type in present_meals:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"↻ Весь {label.lower()}",
-                        callback_data=(
-                            f"history:repeat_meal:{day.isoformat()}:{meal_type}"
-                        ),
+    present_groups: set[tuple[str, int | None]] = set()
+    for entry in all_entries:
+        snack_number = (
+            entry.snack_number if entry.meal_type == "snack" else None
+        )
+        if entry.meal_type == "snack" and snack_number is None:
+            snack_number = 1
+        present_groups.add((entry.meal_type, snack_number))
+
+    ordered_groups: list[tuple[str, int | None]] = []
+    for meal_type in ("breakfast", "lunch", "dinner"):
+        if (meal_type, None) in present_groups:
+            ordered_groups.append((meal_type, None))
+    ordered_groups.extend(
+        sorted(
+            (group for group in present_groups if group[0] == "snack"),
+            key=lambda group: group[1] or 1,
+        )
+    )
+
+    for meal_type, snack_number in ordered_groups:
+        label = meal_label(meal_type, snack_number)
+        number = snack_number or 0
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"↻ Весь {label.lower()}",
+                    callback_data=(
+                        f"history:repeat_meal:{day.isoformat()}:"
+                        f"{meal_type}:{number}"
                     ),
-                    InlineKeyboardButton(
-                        text="💾 Шаблон",
-                        callback_data=f"history:save_meal:{day.isoformat()}:{meal_type}",
+                ),
+                InlineKeyboardButton(
+                    text="💾 Шаблон",
+                    callback_data=(
+                        f"history:save_meal:{day.isoformat()}:"
+                        f"{meal_type}:{number}"
                     ),
-                ]
-            )
+                ),
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -104,15 +128,18 @@ def repeat_entry_confirmation(entry_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def repeat_meal_confirmation(day: date, meal_type: str) -> InlineKeyboardMarkup:
-    """Build confirmation for repeating all entries in one meal."""
+def repeat_meal_confirmation(
+    day: date, meal_type: str, snack_number: int | None = None
+) -> InlineKeyboardMarkup:
+    """Build confirmation for repeating one meal or numbered snack group."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="Повторить прием",
                     callback_data=(
-                        f"history:confirm_meal:{day.isoformat()}:{meal_type}"
+                        f"history:confirm_meal:{day.isoformat()}:"
+                        f"{meal_type}:{snack_number or 0}"
                     ),
                 ),
                 InlineKeyboardButton(text="Отмена", callback_data="history:cancel"),
