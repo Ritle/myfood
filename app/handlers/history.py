@@ -23,9 +23,9 @@ from app.services.days import get_or_create_active_diary_day
 from app.services.diary import (
     MEAL_LABELS,
     get_entries_for_day,
+    load_owned_entry,
     meal_label,
     next_snack_number,
-    load_owned_entry,
     summarize_entries,
 )
 from app.services.foods import load_food
