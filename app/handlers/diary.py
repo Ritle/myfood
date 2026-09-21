@@ -288,7 +288,7 @@ async def prepare_food_batch(
         meal_type=meal_type,
         snack_number=snack_number,
         preview_items=preview_items,
-        title=f"Проверьте список для «{MEAL_LABELS[meal_type]}»:",
+        title=f"Проверьте список для «{meal_label(meal_type, snack_number)}»:",
     )
 
 
@@ -427,6 +427,9 @@ async def confirm_food_batch(
                 break
             items.append((food, weight))
         if not stale:
+            snack_number = await ensure_snack_context(
+                state, session, user, meal_type
+            )
             previous_entries = await today_entries(session, user)
             previous_total = summarize_entries(previous_entries).calories
             entries = await add_diary_entries(
@@ -434,6 +437,7 @@ async def confirm_food_batch(
                 user_id=user.id,
                 items=items,
                 meal_type=meal_type,
+                snack_number=snack_number,
             )
             current_entries = await today_entries(session, user)
             alert = await claim_alert_for_change(
@@ -454,14 +458,14 @@ async def confirm_food_batch(
         await callback.answer("Список устарел", show_alert=True)
         return
 
-    await continue_diary_addition(state, meal_type)
+    await continue_diary_addition(state, meal_type, snack_number)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except TelegramAPIError:
         pass
     await callback.message.answer(
         f"Добавлено продуктов: {len(entries)}.\n\n{format_summary(current_entries)}\n\n"
-        f"Добавьте следующий продукт в «{MEAL_LABELS[meal_type]}» "
+        f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
         "или нажмите «✅ Завершить добавление».",
         reply_markup=diary_menu(adding=True),
     )
@@ -716,6 +720,9 @@ async def repeat_recent_food_portion(
                 "Список недавних устарел. Откройте его снова.", show_alert=True
             )
             return
+        snack_number = await ensure_snack_context(
+            state, session, user, meal_type
+        )
         previous_entries = await today_entries(session, user)
         previous_total = summarize_entries(previous_entries).calories
         entry = await add_diary_entry(
@@ -724,6 +731,7 @@ async def repeat_recent_food_portion(
             food=previous_entry.food,
             meal_type=meal_type,
             weight_grams=previous_entry.weight_grams,
+            snack_number=snack_number,
         )
         entries = await today_entries(session, user)
         alert = await claim_alert_for_change(
@@ -735,7 +743,7 @@ async def repeat_recent_food_portion(
         )
         recent_items = await recent_food_portions(session, user_id=user.id)
 
-    await continue_diary_addition(state, meal_type)
+    await continue_diary_addition(state, meal_type, snack_number)
     try:
         await callback.message.edit_reply_markup(
             reply_markup=diary_recent_food_results(recent_items, meal_type)
@@ -752,7 +760,7 @@ async def repeat_recent_food_portion(
         f"{format_decimal(entry.calories)} ккал · "
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-        f"Добавьте следующий продукт в «{MEAL_LABELS[meal_type]}» "
+        f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
         "или нажмите «✅ Завершить добавление».",
         reply_markup=diary_menu(adding=True),
     )
@@ -785,6 +793,9 @@ async def select_diary_food(
     async with session_factory() as session:
         user = await ensure_user(session, callback.from_user)
         food = await load_food(session, user_id=user.id, food_id=food_id)
+        snack_number = await ensure_snack_context(
+            state, session, user, meal_type
+        )
         if food is not None and meal_type in MEAL_LABELS and food.nutrition_basis == "portion":
             previous_entries = await today_entries(session, user)
             previous_total = summarize_entries(previous_entries).calories
@@ -794,6 +805,7 @@ async def select_diary_food(
                 food=food,
                 meal_type=meal_type,
                 weight_grams=Decimal(1),
+                snack_number=snack_number,
             )
             entries = await today_entries(session, user)
             alert = await claim_alert_for_change(
@@ -811,14 +823,14 @@ async def select_diary_food(
         await callback.answer("Продукт недоступен", show_alert=True)
         return
     if entry is not None:
-        await continue_diary_addition(state, meal_type)
+        await continue_diary_addition(state, meal_type, snack_number)
         if callback.message is not None:
             await callback.message.answer(
                 f"Добавлено блюдо целиком: {food.name}\n"
                 f"{format_decimal(entry.calories)} ккал · "
                 f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
                 f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-                f"Добавьте следующую позицию в «{MEAL_LABELS[meal_type]}» "
+                f"Добавьте следующую позицию в «{meal_label(meal_type, snack_number)}» "
                 "или нажмите «✅ Завершить добавление».",
                 reply_markup=diary_menu(adding=True),
             )
@@ -828,7 +840,11 @@ async def select_diary_food(
         await callback.answer("Блюдо добавлено")
         return
     await state.set_state(DiaryAdd.weight)
-    await state.update_data(food_id=food_id, meal_type=meal_type)
+    await state.update_data(
+        food_id=food_id,
+        meal_type=meal_type,
+        snack_number=snack_number,
+    )
     if callback.message is not None:
         await callback.message.answer(
             f"Выберите порцию для «{food.name}» или введите точный вес в граммах.\n"
@@ -861,7 +877,9 @@ async def enter_portion_weight(
         if food is None:
             meal_type = data.get("meal_type")
             if meal_type in MEAL_LABELS:
-                await continue_diary_addition(state, meal_type)
+                await continue_diary_addition(
+                    state, meal_type, data.get("snack_number")
+                )
             else:
                 await state.clear()
             await message.answer(
@@ -869,14 +887,19 @@ async def enter_portion_weight(
                 reply_markup=diary_menu(adding=meal_type in MEAL_LABELS),
             )
             return
+        meal_type = data["meal_type"]
+        snack_number = await ensure_snack_context(
+            state, session, user, meal_type
+        )
         previous_entries = await today_entries(session, user)
         previous_total = summarize_entries(previous_entries).calories
         entry = await add_diary_entry(
             session,
             user_id=user.id,
             food=food,
-            meal_type=data["meal_type"],
+            meal_type=meal_type,
             weight_grams=weight,
+            snack_number=snack_number,
         )
         entries = await today_entries(session, user)
         alert = await claim_alert_for_change(
@@ -887,7 +910,7 @@ async def enter_portion_weight(
             settings=settings,
         )
     meal_type = data["meal_type"]
-    await continue_diary_addition(state, meal_type)
+    await continue_diary_addition(state, meal_type, snack_number)
     amount = (
         "1 порция"
         if entry.is_full_serving
@@ -898,7 +921,7 @@ async def enter_portion_weight(
         f"{format_decimal(entry.calories)} ккал · "
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-        f"Добавьте следующий продукт в «{MEAL_LABELS[meal_type]}» "
+        f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
         "или нажмите «✅ Завершить добавление».",
         reply_markup=diary_menu(adding=True),
     )
@@ -1034,10 +1057,32 @@ async def cancel_entry_deletion(callback: CallbackQuery) -> None:
     await callback.answer("Удаление отменено")
 
 
-async def continue_diary_addition(state: FSMContext, meal_type: str) -> None:
-    """Return to product input while preserving the selected meal."""
+async def continue_diary_addition(
+    state: FSMContext, meal_type: str, snack_number: int | None = None
+) -> None:
+    """Return to product input while preserving the selected meal/snack group."""
     await state.set_state(DiaryAdd.query)
-    await state.set_data({"meal_type": meal_type})
+    await state.set_data(
+        {"meal_type": meal_type, "snack_number": snack_number}
+    )
+
+
+async def ensure_snack_context(
+    state: FSMContext,
+    session: AsyncSession,
+    user: User,
+    meal_type: str,
+) -> int | None:
+    """Return the active snack number, allocating one if a stale action lacks it."""
+    if meal_type != "snack":
+        await state.update_data(snack_number=None)
+        return None
+    data = await state.get_data()
+    snack_number = data.get("snack_number")
+    if not isinstance(snack_number, int) or snack_number < 1:
+        snack_number = next_snack_number(await today_entries(session, user))
+        await state.update_data(snack_number=snack_number)
+    return snack_number
 
 
 async def ensure_user(session: AsyncSession, telegram_user: TelegramUser) -> User:
