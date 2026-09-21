@@ -36,6 +36,8 @@ from app.services.diary import (
     calculate_portion,
     get_entries_for_day,
     load_owned_entry,
+    meal_label,
+    next_snack_number,
     remove_diary_entry,
     resize_diary_entry,
     suggest_meal_type,
@@ -99,11 +101,19 @@ async def open_diary(
         return
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
-    meal_type = suggest_meal_type(user.timezone)
+        meal_type = suggest_meal_type(user.timezone)
+        snack_number = (
+            next_snack_number(await today_entries(session, user))
+            if meal_type == "snack"
+            else None
+        )
     await state.set_state(DiaryAdd.query)
-    await state.update_data(meal_type=meal_type)
+    await state.set_data(
+        {"meal_type": meal_type, "snack_number": snack_number}
+    )
     await message.answer(
-        f"Предлагаю записать в «{MEAL_LABELS[meal_type]}». Введите продукт или бренд; "
+        f"Предлагаю записать в «{meal_label(meal_type, snack_number)}». "
+        "Введите продукт или бренд; "
         "при необходимости смените прием пищи кнопкой ниже.",
         reply_markup=diary_menu(adding=True),
     )
@@ -114,13 +124,30 @@ async def open_diary(
 
 
 @router.message(F.text.in_(MEAL_BUTTONS))
-async def choose_meal(message: Message, state: FSMContext) -> None:
-    """Select a meal and prompt for a product search."""
+async def choose_meal(
+    message: Message, state: FSMContext, session_factory: async_sessionmaker
+) -> None:
+    """Select a meal and keep one snack number for the whole entry session."""
+    if message.from_user is None:
+        return
     meal_type = MEAL_BUTTONS[message.text or ""]
+    current = await state.get_data()
+    snack_number = None
+    if meal_type == "snack":
+        current_number = current.get("snack_number")
+        if current.get("meal_type") == "snack" and isinstance(current_number, int):
+            snack_number = current_number
+        else:
+            async with session_factory() as session:
+                user = await ensure_user(session, message.from_user)
+                snack_number = next_snack_number(await today_entries(session, user))
     await state.set_state(DiaryAdd.query)
-    await state.update_data(meal_type=meal_type)
+    await state.set_data(
+        {"meal_type": meal_type, "snack_number": snack_number}
+    )
     await message.answer(
-        f"Выбрано «{MEAL_LABELS[meal_type]}». Введите продукт или бренд; "
+        f"Выбрано «{meal_label(meal_type, snack_number)}». "
+        "Введите продукт или бренд; "
         "при необходимости смените прием пищи кнопкой ниже.",
         reply_markup=diary_menu(adding=True),
     )
@@ -136,7 +163,12 @@ async def finish_diary_addition(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     meal_type = data.get("meal_type")
     await state.clear()
-    label = MEAL_LABELS.get(meal_type)
+    snack_number = data.get("snack_number")
+    label = (
+        meal_label(meal_type, snack_number)
+        if meal_type in MEAL_LABELS
+        else None
+    )
     text = (
         f"✅ Добавление в «{label}» завершено."
         if label is not None
@@ -163,6 +195,7 @@ async def search_product_for_diary(
             session_factory,
             batch=batch,
             default_meal_type=data.get("meal_type"),
+            default_snack_number=data.get("snack_number"),
         )
         return
     if message.from_user is None:
@@ -200,6 +233,7 @@ async def prepare_food_batch(
     *,
     batch: ParsedFoodBatch,
     default_meal_type: str | None,
+    default_snack_number: int | None,
 ) -> None:
     """Resolve products and display their weights and totals for confirmation."""
     if message.from_user is None:
@@ -213,6 +247,13 @@ async def prepare_food_batch(
     missing: list[str] = []
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
+        snack_number = (
+            default_snack_number
+            if meal_type == "snack" and default_meal_type == "snack"
+            else None
+        )
+        if meal_type == "snack" and not isinstance(snack_number, int):
+            snack_number = next_snack_number(await today_entries(session, user))
         for item in batch.items:
             matches = await search_foods(
                 session, user_id=user.id, query=item.query, limit=20
@@ -245,6 +286,7 @@ async def prepare_food_batch(
         message,
         state,
         meal_type=meal_type,
+        snack_number=snack_number,
         preview_items=preview_items,
         title=f"Проверьте список для «{MEAL_LABELS[meal_type]}»:",
     )
@@ -255,6 +297,7 @@ async def prepare_batch_confirmation(
     state: FSMContext,
     *,
     meal_type: str,
+    snack_number: int | None = None,
     preview_items: list[tuple[str, Food, Decimal, bool]],
     title: str,
 ) -> None:
@@ -300,7 +343,11 @@ async def prepare_batch_confirmation(
         f"У {format_decimal(totals['carbs'])}"
     )
     await state.set_state(DiaryAdd.batch_confirm)
-    await state.update_data(meal_type=meal_type, batch_items=state_items)
+    await state.update_data(
+        meal_type=meal_type,
+        snack_number=snack_number,
+        batch_items=state_items,
+    )
     await message.answer("\n".join(lines), reply_markup=diary_batch_confirmation())
 
 
