@@ -116,7 +116,7 @@ def test_template_controls_are_attached_to_history_and_diary() -> None:
         for row in history.inline_keyboard
         for button in row
     }
-    assert "history:save_meal:2026-09-13:breakfast" in history_callbacks
+    assert "history:save_meal:2026-09-13:breakfast:0" in history_callbacks
 
     diary = diary_source_actions("breakfast")
     diary_callbacks = {
