@@ -598,6 +598,9 @@ async def use_meal_template(
         if template is None or not 1 <= len(template.items) <= MAX_MEAL_TEMPLATE_ITEMS:
             await callback.answer("Шаблон недоступен или устарел", show_alert=True)
             return
+        snack_number = await ensure_snack_context(
+            state, session, user, meal_type
+        )
         preview_items = []
         for template_item in template.items:
             food = await load_food(
@@ -617,9 +620,11 @@ async def use_meal_template(
         callback.message,
         state,
         meal_type=meal_type,
+        snack_number=snack_number,
         preview_items=preview_items,
         title=(
-            f"Шаблон «{template.name}» для «{MEAL_LABELS[meal_type]}». "
+            f"Шаблон «{template.name}» для "
+            f"«{meal_label(meal_type, snack_number)}». "
             "Проверьте состав и актуальные КБЖУ:"
         ),
     )
