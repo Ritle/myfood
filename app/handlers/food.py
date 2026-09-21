@@ -104,9 +104,13 @@ async def answer_food_card(
 @router.message(Command("catalog"))
 @router.message(F.text == "📚 Каталог продуктов")
 async def open_food_menu(message: Message, state: FSMContext) -> None:
-    """Open the product catalog menu."""
+    """Open the catalog directly in product-search mode."""
     await state.clear()
-    await message.answer("Каталог продуктов:", reply_markup=food_menu())
+    await state.set_state(FoodSearch.query)
+    await message.answer(
+        "Введите название продукта или бренд:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 @router.message(F.text == "↩️ Главное меню")
