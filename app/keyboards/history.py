@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.models import FoodEntry
-from app.services.diary import MEAL_LABELS, meal_label
+from app.services.diary import meal_label
 
 
 def history_keyboard(
