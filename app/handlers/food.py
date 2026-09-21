@@ -104,9 +104,13 @@ async def answer_food_card(
 @router.message(Command("catalog"))
 @router.message(F.text == "📚 Каталог продуктов")
 async def open_food_menu(message: Message, state: FSMContext) -> None:
-    """Open the product catalog menu."""
+    """Open the catalog directly in product-search mode."""
     await state.clear()
-    await message.answer("Каталог продуктов:", reply_markup=food_menu())
+    await state.set_state(FoodSearch.query)
+    await message.answer(
+        "Введите название продукта или бренд:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 @router.message(F.text == "↩️ Главное меню")
@@ -192,10 +196,10 @@ async def search_food_catalog(
             await message.answer(str(error))
             return
     if not page.items:
-        await state.clear()
+        await state.set_state(FoodSearch.query)
         await message.answer(
-            "Ничего не найдено. Попробуйте другой запрос или создайте продукт.",
-            reply_markup=food_menu(),
+            "Ничего не найдено. Введите другой запрос:",
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
     await state.set_state(FoodSearch.results)

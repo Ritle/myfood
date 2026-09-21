@@ -36,14 +36,19 @@ HISTORY_LIMIT = 20
 async def open_weight(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
-    """Open weight tracking and show progress toward the target."""
+    """Open weight tracking and immediately wait for a new measurement."""
     if message.from_user is None:
         return
     await state.clear()
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
         history = await get_weight_history(session, user_id=user.id)
-    await message.answer(format_weight_status(user, history), reply_markup=weight_menu())
+    await state.set_state(WeightAdd.value)
+    await message.answer(
+        f"{format_weight_status(user, history)}\n\n"
+        "Введите текущий вес от 30 до 350 кг:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 @router.message(F.text == "Записать вес")

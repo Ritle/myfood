@@ -36,14 +36,19 @@ QUICK_AMOUNTS = {"+200 мл": 200, "+300 мл": 300, "+500 мл": 500}
 async def open_water(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
-    """Open water tracking and show today's progress."""
+    """Open water tracking and immediately wait for a custom amount."""
     if message.from_user is None:
         return
     await state.clear()
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
         entries = await today_water(session, user)
-    await message.answer(format_water_status(user, entries), reply_markup=water_menu())
+    await state.set_state(WaterAdd.amount)
+    await message.answer(
+        f"{format_water_status(user, entries)}\n\n"
+        "Введите объем воды от 1 до 10000 мл:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 @router.message(F.text.in_(QUICK_AMOUNTS))
