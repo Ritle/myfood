@@ -49,6 +49,37 @@ class DiarySummary:
     carbs: Decimal
 
 
+def meal_label(meal_type: str, snack_number: int | None = None) -> str:
+    """Return a display label, numbering snack groups inside one logical day."""
+    if meal_type not in MEAL_LABELS:
+        raise ValueError("unknown meal type")
+    if meal_type != "snack":
+        return MEAL_LABELS[meal_type]
+    number = snack_number if snack_number is not None else 1
+    return f"🍎 Перекус {number}"
+
+
+def next_snack_number(entries: list[FoodEntry]) -> int:
+    """Return the next snack group number for a logical day."""
+    numbers = [
+        entry.snack_number if entry.snack_number is not None else 1
+        for entry in entries
+        if entry.meal_type == "snack"
+    ]
+    return max(numbers, default=0) + 1
+
+
+def validate_snack_number(meal_type: str, snack_number: int | None) -> int | None:
+    """Validate snack grouping while keeping other meals unnumbered."""
+    if meal_type != "snack":
+        return None
+    if snack_number is None:
+        return 1
+    if isinstance(snack_number, bool) or snack_number < 1:
+        raise ValueError("snack number must be positive")
+    return snack_number
+
+
 def calculate_portion(food: Food, weight_grams: Decimal) -> PortionNutrition:
     """Calculate nutrition for a weighed product or return one whole dish."""
     validate_portion_weight(weight_grams)
@@ -111,11 +142,13 @@ async def add_diary_entry(
     food: Food,
     meal_type: str,
     weight_grams: Decimal,
+    snack_number: int | None = None,
     eaten_at: datetime | None = None,
 ) -> FoodEntry:
     """Store a nutrient snapshot for a consumed product portion."""
     if meal_type not in MEAL_TYPES:
         raise ValueError("unknown meal type")
+    snack_number = validate_snack_number(meal_type, snack_number)
     portion = calculate_portion(food, weight_grams)
     is_full_serving = food.nutrition_basis == "portion"
     stored_weight = Decimal(1) if is_full_serving else weight_grams
@@ -125,6 +158,7 @@ async def add_diary_entry(
             user_id=user_id,
             food_id=food.id,
             meal_type=meal_type,
+            snack_number=snack_number,
             weight_grams=stored_weight.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
             is_full_serving=is_full_serving,
             calories=portion.calories,
@@ -142,6 +176,7 @@ async def add_diary_entries(
     user_id: int,
     items: list[tuple[Food, Decimal]],
     meal_type: str,
+    snack_number: int | None = None,
     eaten_at: datetime | None = None,
 ) -> list[FoodEntry]:
     """Store a confirmed group of products atomically with one shared timestamp."""
@@ -149,6 +184,7 @@ async def add_diary_entries(
         raise ValueError("unknown meal type")
     if not items:
         raise ValueError("at least one food is required")
+    snack_number = validate_snack_number(meal_type, snack_number)
     timestamp = eaten_at or datetime.now(UTC)
     entries = []
     for food, weight_grams in items:
@@ -160,6 +196,7 @@ async def add_diary_entries(
                 user_id=user_id,
                 food_id=food.id,
                 meal_type=meal_type,
+                snack_number=snack_number,
                 weight_grams=stored_weight.quantize(NUTRIENT_STEP, rounding=ROUND_HALF_UP),
                 is_full_serving=is_full_serving,
                 calories=portion.calories,

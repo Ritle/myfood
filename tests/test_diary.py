@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.handlers.diary import is_diary_search_text
+from app.handlers.diary import format_diary, is_diary_search_text
 from app.keyboards.diary import (
     FINISH_DIARY_ADDING_TEXT,
     diary_menu,
@@ -16,6 +16,8 @@ from app.services.diary import (
     add_diary_entry,
     calculate_portion,
     get_entries_for_day,
+    meal_label,
+    next_snack_number,
     remove_diary_entry,
     resize_diary_entry,
     suggest_meal_type,
@@ -342,5 +344,60 @@ async def test_full_dish_is_added_as_one_serving_without_weight_scaling() -> Non
                     entry_id=entry.id,
                     new_weight_grams=Decimal(200),
                 )
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_numbered_snacks_stay_separate_inside_one_day() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=990, first_name="Owner")
+            food = sample_food()
+            session.add_all([owner, food])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(food)
+
+            first = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="snack",
+                snack_number=1,
+                weight_grams=Decimal(100),
+            )
+            second = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="snack",
+                snack_number=1,
+                weight_grams=Decimal(50),
+            )
+            third = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="snack",
+                snack_number=2,
+                weight_grams=Decimal(80),
+            )
+            entries = [first, second, third]
+
+            assert [entry.snack_number for entry in entries] == [1, 1, 2]
+            assert next_snack_number(entries) == 3
+            assert meal_label("snack", 1) == "🍎 Перекус 1"
+            assert meal_label("snack", 2) == "🍎 Перекус 2"
+
+            text = format_diary(entries)
+            assert "🍎 Перекус 1" in text
+            assert "🍎 Перекус 2" in text
+            assert text.count("Подытог:") == 2
     finally:
         await engine.dispose()

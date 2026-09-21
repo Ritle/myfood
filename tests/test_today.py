@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models import Base, NotificationLog, User
+from app.models import Base, Food, FoodEntry, NotificationLog, User
 from app.services.calorie_alerts import claim_calorie_alert, crossed_calorie_levels
 from app.services.today import format_today, progress_bar
 
@@ -92,3 +92,47 @@ async def test_alert_claim_is_deduplicated_and_suppresses_lower_levels() -> None
         assert user.first_name == "User"
     finally:
         await engine.dispose()
+
+
+
+def test_today_screen_splits_numbered_snacks() -> None:
+    user = User(telegram_id=2, first_name="User")
+    food = Food(
+        name="Банан",
+        name_normalized="банан",
+        calories_per_100g=Decimal(100),
+        protein_per_100g=Decimal(1),
+        fat_per_100g=Decimal(0),
+        carbs_per_100g=Decimal(20),
+        is_public=True,
+    )
+    entries = [
+        FoodEntry(
+            meal_type="snack",
+            snack_number=1,
+            calories=Decimal(100),
+            protein=Decimal(1),
+            fat=Decimal(0),
+            carbs=Decimal(20),
+            weight_grams=Decimal(100),
+            is_full_serving=False,
+            food=food,
+        ),
+        FoodEntry(
+            meal_type="snack",
+            snack_number=2,
+            calories=Decimal(150),
+            protein=Decimal(2),
+            fat=Decimal(1),
+            carbs=Decimal(30),
+            weight_grams=Decimal(150),
+            is_full_serving=False,
+            food=food,
+        ),
+    ]
+
+    text = format_today(user, entries)
+
+    assert "🍎 Перекус 1: 100 ккал" in text
+    assert "🍎 Перекус 2: 150 ккал" in text
+    assert "🍎 Перекус: 250 ккал" not in text

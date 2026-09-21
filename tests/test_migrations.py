@@ -51,7 +51,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
             ).fetchall()
         }
 
-    assert revision == ("0015_full_dish_portions",)
+    assert revision == ("0016_add_snack_numbers",)
     assert {
         "users",
         "foods",
@@ -70,6 +70,6 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "movement_interval_minutes",
     } <= notification_columns
     assert {"catalog_section", "nutrition_basis"} <= food_columns
-    assert "is_full_serving" in food_entry_columns
+    assert {"is_full_serving", "snack_number"} <= food_entry_columns
     assert "is_full_serving" in template_item_columns
     assert {"user_id", "logical_date", "started_at", "ended_at"} <= diary_day_columns

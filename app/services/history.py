@@ -12,6 +12,7 @@ async def repeat_food_entry(
     *,
     user_id: int,
     entry_id: int,
+    snack_number: int | None = None,
     eaten_at: datetime | None = None,
 ) -> FoodEntry | None:
     """Copy one owned nutrient snapshot into the current diary."""
@@ -19,6 +20,8 @@ async def repeat_food_entry(
     if source is None:
         return None
     copy = clone_entry(source, eaten_at=eaten_at or datetime.now(UTC))
+    if source.meal_type == "snack" and snack_number is not None:
+        copy.snack_number = snack_number
     session.add(copy)
     await session.commit()
     await session.refresh(copy)
@@ -32,6 +35,8 @@ async def repeat_meal(
     source_day: date,
     meal_type: str,
     timezone_name: str,
+    snack_number: int | None = None,
+    target_snack_number: int | None = None,
     eaten_at: datetime | None = None,
 ) -> list[FoodEntry]:
     """Copy all snapshots from one owned meal into the current diary."""
@@ -41,7 +46,19 @@ async def repeat_meal(
         session, user_id=user_id, day=source_day, timezone_name=timezone_name
     )
     timestamp = eaten_at or datetime.now(UTC)
-    copies = [clone_entry(entry, eaten_at=timestamp) for entry in entries if entry.meal_type == meal_type]
+    selected = [
+        entry
+        for entry in entries
+        if entry.meal_type == meal_type
+        and (
+            meal_type != "snack"
+            or (entry.snack_number or 1) == (snack_number or 1)
+        )
+    ]
+    copies = [clone_entry(entry, eaten_at=timestamp) for entry in selected]
+    if meal_type == "snack" and target_snack_number is not None:
+        for copy in copies:
+            copy.snack_number = target_snack_number
     if not copies:
         return []
     session.add_all(copies)
@@ -58,6 +75,7 @@ def clone_entry(source: FoodEntry, *, eaten_at: datetime) -> FoodEntry:
         food_id=source.food_id,
         food=source.food,
         meal_type=source.meal_type,
+        snack_number=source.snack_number,
         weight_grams=source.weight_grams,
         is_full_serving=source.is_full_serving,
         calories=source.calories,
