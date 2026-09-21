@@ -1107,16 +1107,31 @@ async def today_entries(session: AsyncSession, user: User) -> list[FoodEntry]:
 
 
 def format_diary(entries: list[FoodEntry]) -> str:
-    """Format entries grouped in the canonical meal order."""
-    grouped: dict[str, list[FoodEntry]] = defaultdict(list)
+    """Format entries with each numbered snack rendered as a separate group."""
+    grouped: dict[tuple[str, int | None], list[FoodEntry]] = defaultdict(list)
     for entry in entries:
-        grouped[entry.meal_type].append(entry)
+        snack_number = (
+            entry.snack_number if entry.meal_type == "snack" else None
+        )
+        if entry.meal_type == "snack" and snack_number is None:
+            snack_number = 1
+        grouped[(entry.meal_type, snack_number)].append(entry)
+
+    ordered_keys: list[tuple[str, int | None]] = []
+    for meal_type in ("breakfast", "lunch", "dinner"):
+        if (meal_type, None) in grouped:
+            ordered_keys.append((meal_type, None))
+    ordered_keys.extend(
+        sorted(
+            (key for key in grouped if key[0] == "snack"),
+            key=lambda key: key[1] or 1,
+        )
+    )
+
     lines = ["📋 Дневник за сегодня"]
-    for meal_type in MEAL_LABELS:
-        meal_entries = grouped[meal_type]
-        if not meal_entries:
-            continue
-        lines.append(f"\n{MEAL_LABELS[meal_type]}")
+    for meal_type, snack_number in ordered_keys:
+        meal_entries = grouped[(meal_type, snack_number)]
+        lines.append(f"\n{meal_label(meal_type, snack_number)}")
         for entry in meal_entries:
             amount = (
                 "1 порция"
