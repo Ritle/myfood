@@ -37,6 +37,7 @@ class FoodEntry(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     food_id: Mapped[int] = mapped_column(ForeignKey("foods.id", ondelete="RESTRICT"))
     meal_type: Mapped[str] = mapped_column(String(16))
+    snack_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight_grams: Mapped[Decimal] = mapped_column(Numeric(8, 2))
     is_full_serving: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()
