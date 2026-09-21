@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.models import FoodEntry, User
-from app.services.diary import MEAL_LABELS, DiarySummary, summarize_entries
+from app.services.diary import MEAL_LABELS, DiarySummary, meal_label, summarize_entries
 from app.utils.formatting import format_decimal
 
 
@@ -13,18 +13,26 @@ class DailyView:
 
     total: DiarySummary
     meal_calories: dict[str, Decimal]
+    snack_calories: dict[int, Decimal]
 
 
 def build_daily_view(entries: list[FoodEntry]) -> DailyView:
     """Aggregate total nutrients and calories by meal."""
     meal_entries: dict[str, list[FoodEntry]] = defaultdict(list)
+    snack_entries: dict[int, list[FoodEntry]] = defaultdict(list)
     for entry in entries:
         meal_entries[entry.meal_type].append(entry)
+        if entry.meal_type == "snack":
+            snack_entries[entry.snack_number or 1].append(entry)
     return DailyView(
         total=summarize_entries(entries),
         meal_calories={
             meal_type: summarize_entries(meal_entries[meal_type]).calories
             for meal_type in MEAL_LABELS
+        },
+        snack_calories={
+            number: summarize_entries(group).calories
+            for number, group in snack_entries.items()
         },
     )
 
@@ -71,8 +79,19 @@ def format_today(user: User, entries: list[FoodEntry], *, water_ml: int = 0) -> 
             "По приемам пищи:",
         ]
     )
-    for meal_type, label in MEAL_LABELS.items():
-        lines.append(f"{label}: {format_decimal(view.meal_calories[meal_type])} ккал")
+    for meal_type in ("breakfast", "lunch", "dinner"):
+        lines.append(
+            f"{MEAL_LABELS[meal_type]}: "
+            f"{format_decimal(view.meal_calories[meal_type])} ккал"
+        )
+    if view.snack_calories:
+        for number in sorted(view.snack_calories):
+            lines.append(
+                f"{meal_label('snack', number)}: "
+                f"{format_decimal(view.snack_calories[number])} ккал"
+            )
+    else:
+        lines.append(f"{MEAL_LABELS['snack']}: 0 ккал")
     return "\n".join(lines)
 
 
