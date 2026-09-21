@@ -196,10 +196,10 @@ async def search_food_catalog(
             await message.answer(str(error))
             return
     if not page.items:
-        await state.clear()
+        await state.set_state(FoodSearch.query)
         await message.answer(
-            "Ничего не найдено. Попробуйте другой запрос или создайте продукт.",
-            reply_markup=food_menu(),
+            "Ничего не найдено. Введите другой запрос:",
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
     await state.set_state(FoodSearch.results)
