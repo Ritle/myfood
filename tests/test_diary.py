@@ -9,11 +9,6 @@ from app.keyboards.diary import (
     FINISH_DIARY_ADDING_TEXT,
     diary_menu,
     diary_portion_keyboard,
-)
-from app.keyboards.diary import (
-    FINISH_DIARY_ADDING_TEXT,
-    diary_menu,
-    diary_portion_keyboard,
     finish_diary_adding_text,
 )
 from app.models import Base, DiaryDay, Food, User
