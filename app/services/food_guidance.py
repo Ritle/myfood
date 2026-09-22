@@ -126,18 +126,36 @@ def format_remaining_guidance(user: User, entries: list[FoodEntry]) -> str | Non
         )
 
     cautions: list[str] = []
-    for key, label, target, actual in (
-        ("protein", "белок", user.daily_protein_target_g, total.protein),
-        ("fat", "жиры", user.daily_fat_target_g, total.fat),
-        ("carbs", "углеводы", user.daily_carbs_target_g, total.carbs),
+    for key, closed_text, almost_text, target, actual in (
+        (
+            "protein",
+            "белок уже закрыт",
+            "белок почти закрыт",
+            user.daily_protein_target_g,
+            total.protein,
+        ),
+        (
+            "fat",
+            "жиры уже закрыты",
+            "жиры почти закрыты",
+            user.daily_fat_target_g,
+            total.fat,
+        ),
+        (
+            "carbs",
+            "углеводы уже закрыты",
+            "углеводы почти закрыты",
+            user.daily_carbs_target_g,
+            total.carbs,
+        ),
     ):
         if target is None or target <= 0:
             continue
         ratio = actual / Decimal(target)
         if ratio >= Decimal("1.0"):
-            cautions.append(f"{label} уже закрыты")
+            cautions.append(closed_text)
         elif ratio >= Decimal("0.9"):
-            cautions.append(f"{label} почти закрыты")
+            cautions.append(almost_text)
     if cautions:
         lines.append("С аккуратностью: " + ", ".join(cautions) + ".")
 
@@ -228,15 +246,20 @@ def recommendation_for_food(
 
     portion = {key: value * factor for key, value in nutrients.items()}
     score = Decimal(0)
-    weights = {"calories": Decimal("1.5"), "protein": Decimal(1), "fat": Decimal(1), "carbs": Decimal(1)}
+    weights = {
+        "calories": Decimal("1.5"),
+        "protein": Decimal(1),
+        "fat": Decimal(1),
+        "carbs": Decimal(1),
+    }
     if dominant is not None:
         weights[dominant] = Decimal(4)
 
     for key, weight in weights.items():
         target_remaining = remaining.get(key)
         if target_remaining is None or target_remaining <= 0:
-            if key != "calories":
-                score -= portion[key] / Decimal(20)
+            divisor = Decimal(200) if key == "calories" else Decimal(20)
+            score -= portion[key] / divisor * weight
             continue
         coverage = min(Decimal(1), portion[key] / target_remaining)
         score += coverage * weight
