@@ -4,6 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app.models import FoodEntry, User
 from app.services.diary import MEAL_LABELS, DiarySummary, meal_label, summarize_entries
+from app.services.food_guidance import format_remaining_guidance
 from app.utils.formatting import format_decimal
 
 
@@ -75,6 +76,13 @@ def format_today(user: User, entries: list[FoodEntry], *, water_ml: int = 0) -> 
             format_nutrient("🥑 Жиры", total.fat, user.daily_fat_target_g),
             format_nutrient("🍞 Углеводы", total.carbs, user.daily_carbs_target_g),
             format_water(water_ml, user.daily_water_target_ml),
+        ]
+    )
+    remaining_guidance = format_remaining_guidance(user, entries)
+    if remaining_guidance is not None:
+        lines.extend(["", remaining_guidance])
+    lines.extend(
+        [
             "",
             "По приемам пищи:",
         ]
