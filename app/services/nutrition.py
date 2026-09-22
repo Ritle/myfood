@@ -13,6 +13,23 @@ GOAL_FACTORS: dict[str, Decimal] = {
     "maintain": Decimal(1),
     "gain": Decimal("1.10"),
 }
+PROTEIN_PER_KG: dict[str, Decimal] = {
+    "lose": Decimal("1.6"),
+    "maintain": Decimal("1.4"),
+    "gain": Decimal("1.6"),
+}
+PROTEIN_ACTIVITY_ADJUSTMENT: dict[str, Decimal] = {
+    "minimal": Decimal("-0.2"),
+    "light": Decimal("-0.1"),
+    "moderate": Decimal(0),
+    "high": Decimal("0.2"),
+    "very_high": Decimal("0.2"),
+}
+FAT_PER_KG: dict[str, Decimal] = {
+    "lose": Decimal("0.8"),
+    "maintain": Decimal("0.9"),
+    "gain": Decimal("1.0"),
+}
 
 
 def age_on(birth_date: date, on_date: date) -> int:
@@ -53,20 +70,65 @@ def calculate_daily_calorie_target(
     return int(target.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
-def calculate_daily_macronutrient_targets(calories: int) -> tuple[int, int, int]:
-    """Suggest protein, fat, and carbohydrate grams from a calorie target.
+def calculate_daily_macronutrient_targets(
+    calories: int,
+    *,
+    weight_kg: Decimal,
+    activity_level: str,
+    goal: str,
+) -> tuple[int, int, int]:
+    """Suggest macros from body weight, goal, activity, and calorie target.
 
-    The starting split is 25% of energy from protein, 30% from fat, and 45%
-    from carbohydrates. This transparent baseline is editable by the user.
+    Protein starts from a goal-specific grams-per-kilogram target and rises
+    modestly for higher activity. Fat starts from a goal-specific
+    grams-per-kilogram target. Both are constrained so the final energy split
+    remains inside the adult AMDR ranges: protein 10-35%, fat 20-35%, and
+    carbohydrates 45-65%. Carbohydrates receive the remaining calories.
     """
     if calories <= 0:
         raise ValueError("calories must be positive")
+    if weight_kg <= 0:
+        raise ValueError("weight must be positive")
+    if activity_level not in ACTIVITY_FACTORS:
+        raise ValueError("unknown activity level")
+    if goal not in GOAL_FACTORS:
+        raise ValueError("unknown goal")
 
     energy = Decimal(calories)
-    protein = energy * Decimal("0.25") / Decimal(4)
-    fat = energy * Decimal("0.30") / Decimal(9)
-    carbohydrates = energy * Decimal("0.45") / Decimal(4)
+
+    protein_per_kg = (
+        PROTEIN_PER_KG[goal] + PROTEIN_ACTIVITY_ADJUSTMENT[activity_level]
+    )
+    desired_protein_energy = weight_kg * protein_per_kg * Decimal(4)
+    protein_energy = clamp(
+        desired_protein_energy,
+        energy * Decimal("0.10"),
+        energy * Decimal("0.35"),
+    )
+
+    desired_fat_energy = weight_kg * FAT_PER_KG[goal] * Decimal(9)
+    min_fat_energy = max(
+        energy * Decimal("0.20"),
+        energy * Decimal("0.35") - protein_energy,
+    )
+    max_fat_energy = min(
+        energy * Decimal("0.35"),
+        energy * Decimal("0.55") - protein_energy,
+    )
+    fat_energy = clamp(desired_fat_energy, min_fat_energy, max_fat_energy)
+
+    carbohydrate_energy = energy - protein_energy - fat_energy
+    values = (
+        protein_energy / Decimal(4),
+        fat_energy / Decimal(9),
+        carbohydrate_energy / Decimal(4),
+    )
     return tuple(
         int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
-        for value in (protein, fat, carbohydrates)
+        for value in values
     )
+
+
+def clamp(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
+    """Clamp a decimal value to an inclusive range."""
+    return min(max(value, minimum), maximum)
