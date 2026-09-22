@@ -3,11 +3,13 @@ from decimal import Decimal
 
 from app.models import FoodEntry, NotificationSettings, User
 from app.services.nutrition_monitoring import (
+    adaptive_meal_targets,
     deviation_status,
     expected_fraction_at,
     format_day_checkpoint,
     format_meal_review,
     meal_targets,
+    remaining_meal_plan,
 )
 
 
@@ -58,6 +60,82 @@ def test_meal_targets_use_30_40_30_distribution() -> None:
     assert meal_targets(user, "snack") == {}
 
 
+def test_adaptive_targets_move_breakfast_underage_to_lunch_and_dinner() -> None:
+    user = user_with_targets()
+    entries = [
+        entry(
+            "breakfast",
+            calories=300,
+            protein=20,
+            fat=10,
+            carbs=35,
+            hour=6,
+        )
+    ]
+
+    lunch = adaptive_meal_targets(user, entries, "lunch")
+    future = remaining_meal_plan(user, entries, ("lunch", "dinner"))
+
+    assert lunch["calories"].value == Decimal("1028.57")
+    assert lunch["protein"].value == Decimal("68.57")
+    assert future["lunch"]["calories"].value == Decimal("1028.57")
+    assert future["dinner"]["calories"].value == Decimal("771.43")
+
+
+def test_adaptive_targets_reduce_later_meals_after_breakfast_overage() -> None:
+    user = user_with_targets()
+    entries = [
+        entry(
+            "breakfast",
+            calories=900,
+            protein=60,
+            fat=30,
+            carbs=100,
+            hour=6,
+        )
+    ]
+
+    lunch = adaptive_meal_targets(user, entries, "lunch")
+
+    assert lunch["calories"].value == Decimal("685.71")
+    assert lunch["protein"].value == Decimal("45.71")
+
+
+def test_snack_before_lunch_reduces_adaptive_lunch_target() -> None:
+    user = user_with_targets()
+    entries = [
+        entry(
+            "breakfast",
+            calories=300,
+            protein=20,
+            fat=10,
+            carbs=35,
+            hour=6,
+        ),
+        entry(
+            "snack",
+            calories=200,
+            protein=10,
+            fat=5,
+            carbs=25,
+            hour=9,
+        ),
+        entry(
+            "lunch",
+            calories=500,
+            protein=30,
+            fat=15,
+            carbs=50,
+            hour=12,
+        ),
+    ]
+
+    lunch = adaptive_meal_targets(user, entries, "lunch")
+
+    assert lunch["calories"].value == Decimal("914.29")
+    assert lunch["protein"].value == Decimal("62.86")
+
+
 def test_deviation_status_distinguishes_strong_under_and_over() -> None:
     target = Decimal(100)
 
@@ -85,9 +163,12 @@ def test_meal_review_reports_kbju_under_and_over() -> None:
 
     assert text is not None
     assert "Завтрак" in text
-    assert "Ориентир: 30% дневной цели" in text
+    assert "Адаптивный ориентир (база 30% дневной цели)" in text
     assert "Калории: 300 / 630 ккал — сильный недобор" in text
     assert "Жиры: 30 / 21 г — сильный перебор" in text
+    assert "План на оставшиеся основные приёмы:" in text
+    assert "1028.57 ккал" in text
+    assert "771.43 ккал" in text
 
 
 def test_1600_checkpoint_uses_70_percent_and_counts_snacks_in_day_total() -> None:
@@ -139,3 +220,6 @@ def test_1600_checkpoint_uses_70_percent_and_counts_snacks_in_day_total() -> Non
     assert "около 70% дневной цели" in text
     assert "Калории: 1200 / 1470 ккал" in text
     assert "До полной дневной цели:" in text
+    assert "Адаптивный план на оставшиеся основные приёмы:" in text
+    assert "900 ккал" in text
+    assert "Б 65 г" in text
