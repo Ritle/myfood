@@ -146,7 +146,7 @@ async def show_dish_catalog(
     """Open the dedicated dish catalog; dishes also remain in ordinary search."""
     if message.from_user is None:
         return
-    await state.clear()
+    await state.set_state(FoodSearch.query)
     async with session_factory() as session:
         user = await get_or_create_user(
             session,
