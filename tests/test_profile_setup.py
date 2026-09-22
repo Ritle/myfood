@@ -61,9 +61,12 @@ async def test_profile_can_keep_calculated_calories_and_macros() -> None:
     state = FakeState(
         {
             "suggested_calories": 2000,
-            "suggested_daily_protein_target_g": 125,
-            "suggested_daily_fat_target_g": 67,
-            "suggested_daily_carbs_target_g": 225,
+            "suggested_daily_protein_target_g": 112,
+            "suggested_daily_fat_target_g": 72,
+            "suggested_daily_carbs_target_g": 226,
+            "current_weight_kg": Decimal(80),
+            "activity_level": "moderate",
+            "goal": "maintain",
         }
     )
     message = FakeMessage(KEEP_CALCULATED)
@@ -72,9 +75,9 @@ async def test_profile_can_keep_calculated_calories_and_macros() -> None:
 
     assert state.current_state == ProfileSetup.water
     assert state.data["daily_calorie_target"] == 2000
-    assert state.data["daily_protein_target_g"] == Decimal(125)
-    assert state.data["daily_fat_target_g"] == Decimal(67)
-    assert state.data["daily_carbs_target_g"] == Decimal(225)
+    assert state.data["daily_protein_target_g"] == Decimal(112)
+    assert state.data["daily_fat_target_g"] == Decimal(72)
+    assert state.data["daily_carbs_target_g"] == Decimal(226)
 
 
 @pytest.mark.asyncio
@@ -101,9 +104,12 @@ async def test_profile_can_keep_calories_then_adjust_macros() -> None:
     state = FakeState(
         {
             "suggested_calories": 2000,
-            "suggested_daily_protein_target_g": 125,
-            "suggested_daily_fat_target_g": 67,
-            "suggested_daily_carbs_target_g": 225,
+            "suggested_daily_protein_target_g": 112,
+            "suggested_daily_fat_target_g": 72,
+            "suggested_daily_carbs_target_g": 226,
+            "current_weight_kg": Decimal(80),
+            "activity_level": "moderate",
+            "goal": "maintain",
         }
     )
     message = FakeMessage(KEEP_CALCULATED)
@@ -112,4 +118,4 @@ async def test_profile_can_keep_calories_then_adjust_macros() -> None:
 
     assert state.data["daily_calorie_target"] == 2000
     assert state.current_state == ProfileSetup.protein
-    assert "125 г" in message.answers[0][0]
+    assert "112 г" in message.answers[0][0]
