@@ -59,6 +59,12 @@ class NotificationSettings(Base):
     movement_interval_minutes: Mapped[int] = mapped_column(
         Integer, default=60, server_default="60"
     )
+    nutrition_monitoring_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true()
+    )
+    nutrition_summary_time: Mapped[time] = mapped_column(
+        Time, default=time(16), server_default="16:00:00"
+    )
     morning_report_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()
     )
