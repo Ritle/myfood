@@ -303,7 +303,7 @@ async def test_nutrition_review_waits_ten_minutes_after_latest_meal_entry() -> N
                 user_id=user.id,
                 food=food,
                 meal_type="breakfast",
-                weight_grams=Decimal("100"),
+                weight_grams=Decimal(100),
                 eaten_at=datetime(2026, 9, 12, 6, 0, tzinfo=UTC),
             )
 
@@ -321,7 +321,7 @@ async def test_nutrition_review_waits_ten_minutes_after_latest_meal_entry() -> N
                 user_id=user.id,
                 food=food,
                 meal_type="breakfast",
-                weight_grams=Decimal("50"),
+                weight_grams=Decimal(50),
                 eaten_at=datetime(2026, 9, 12, 6, 8, tzinfo=UTC),
             )
 
@@ -407,7 +407,7 @@ async def test_nutrition_summary_is_planned_at_configured_time_and_snacks_do_not
                 food=food,
                 meal_type="snack",
                 snack_number=1,
-                weight_grams=Decimal("100"),
+                weight_grams=Decimal(100),
                 eaten_at=datetime(2026, 9, 12, 11, 0, tzinfo=UTC),
             )
 
