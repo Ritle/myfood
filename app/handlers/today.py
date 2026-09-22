@@ -73,13 +73,19 @@ async def suggest_food_for_today(
                 reply_markup=today_menu(),
             )
             return
+        current = datetime.now(UTC)
         recommendations = await recommend_foods_for_today(
             session,
             user=user,
             entries=entries,
-            now=datetime.now(UTC),
+            now=current,
         )
-        text = format_food_recommendations(user, entries, recommendations)
+        text = format_food_recommendations(
+            user,
+            entries,
+            recommendations,
+            now=current,
+        )
     await message.answer(
         text,
         reply_markup=(
