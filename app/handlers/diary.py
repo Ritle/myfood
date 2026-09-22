@@ -57,15 +57,15 @@ from app.services.foods import (
     search_foods,
     search_foods_page,
 )
-from app.services.nutrition_monitoring import (
-    format_meal_review,
-    latest_meal_eaten_at,
-)
 from app.services.meal_templates import (
     MAX_MEAL_TEMPLATE_ITEMS,
     delete_owned_meal_template,
     list_user_meal_templates,
     load_owned_meal_template,
+)
+from app.services.nutrition_monitoring import (
+    format_meal_review,
+    latest_meal_eaten_at,
 )
 from app.states.diary import DiaryAdd, DiaryEdit
 from app.utils.food_batches import (
