@@ -1,11 +1,11 @@
+from decimal import Decimal
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
-
-from decimal import Decimal
 
 from app.models import WeightEntry
 
