@@ -194,7 +194,12 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
         activity_level=data["activity_level"],
         goal=value,
     )
-    protein, fat, carbs = calculate_daily_macronutrient_targets(target)
+    protein, fat, carbs = calculate_daily_macronutrient_targets(
+        target,
+        weight_kg=data["current_weight_kg"],
+        activity_level=data["activity_level"],
+        goal=value,
+    )
     await state.update_data(
         goal=value,
         suggested_calories=target,
@@ -210,8 +215,8 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
         f"Жиры: {fat} г\n"
         f"Углеводы: {carbs} г\n\n"
         "Можно оставить расчет или скорректировать значения. "
-        "Расчет КБЖУ использует распределение энергии 25% / 30% / 45% "
-        "и служит ориентиром.",
+        "Белок и жир рассчитываются от массы тела с учетом цели и активности, "
+        "углеводы — из оставшейся калорийности. Значения служат ориентиром.",
         reply_markup=choices(KEEP_CALCULATED, "Скорректировать"),
     )
 
@@ -253,7 +258,13 @@ async def enter_calories(message: Message, state: FSMContext) -> None:
         if value is None or not 800 <= value <= 10000:
             await message.answer("Введите целое число от 800 до 10000 ккал или оставьте расчет.")
             return
-    protein, fat, carbs = calculate_daily_macronutrient_targets(value)
+    data = await state.get_data()
+    protein, fat, carbs = calculate_daily_macronutrient_targets(
+        value,
+        weight_kg=data["current_weight_kg"],
+        activity_level=data["activity_level"],
+        goal=data["goal"],
+    )
     await state.update_data(
         daily_calorie_target=value,
         suggested_daily_protein_target_g=protein,
