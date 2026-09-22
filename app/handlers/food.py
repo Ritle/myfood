@@ -36,6 +36,15 @@ from app.utils.numbers import parse_decimal
 
 router = Router()
 
+FOOD_MENU_ACTIONS = {
+    "📚 Найти продукт",
+    "🍽 Блюда",
+    "⭐ Избранные",
+    "🕘 Недавние",
+    "➕ Создать продукт",
+    "➕ Создать блюдо",
+    "↩️ Главное меню",
+}
 EDITABLE_FOOD_FIELDS = {"name", "brand", "calories", "protein", "fat", "carbs"}
 NUTRIENT_EDIT_FIELDS = {
     "calories": "calories_per_100g",
@@ -109,7 +118,7 @@ async def open_food_menu(message: Message, state: FSMContext) -> None:
     await state.set_state(FoodSearch.query)
     await message.answer(
         "Введите название продукта или бренд:",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=food_menu(),
     )
 
 
@@ -124,7 +133,10 @@ async def return_to_main_menu(message: Message, state: FSMContext) -> None:
 async def begin_food_search(message: Message, state: FSMContext) -> None:
     """Prompt for a catalog query."""
     await state.set_state(FoodSearch.query)
-    await message.answer("Введите название продукта или бренд:", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        "Введите название продукта или бренд:",
+        reply_markup=food_menu(),
+    )
 
 
 @router.message(F.text == "🍽 Блюда")
@@ -174,7 +186,7 @@ async def paginate_dish_catalog(
     await callback.answer()
 
 
-@router.message(FoodSearch.query)
+@router.message(FoodSearch.query, ~F.text.in_(FOOD_MENU_ACTIONS))
 async def search_food_catalog(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
@@ -199,10 +211,10 @@ async def search_food_catalog(
         await state.set_state(FoodSearch.query)
         await message.answer(
             "Ничего не найдено. Введите другой запрос:",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=food_menu(),
         )
         return
-    await state.set_state(FoodSearch.results)
+    await state.set_state(FoodSearch.query)
     await state.update_data(food_query=message.text or "")
     await message.answer(
         "Найденные продукты:",
