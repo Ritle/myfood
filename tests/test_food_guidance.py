@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -105,7 +106,47 @@ async def test_recommendations_prefer_lean_protein_when_protein_is_missing() -> 
                 carbs_per_100g=Decimal(28),
                 is_public=True,
             )
-            session.add_all([user, chicken, cheese, rice])
+            unused_ideal = Food(
+                name="Идеальный протеин",
+                name_normalized="идеальный протеин",
+                calories_per_100g=Decimal(100),
+                protein_per_100g=Decimal(40),
+                fat_per_100g=Decimal(0),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            session.add_all([user, chicken, cheese, rice, unused_ideal])
+            await session.flush()
+
+            session.add_all(
+                [
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=chicken.id,
+                        meal_type="dinner",
+                        weight_grams=Decimal(150),
+                        is_full_serving=False,
+                        calories=Decimal("247.5"),
+                        protein=Decimal("46.5"),
+                        fat=Decimal("5.4"),
+                        carbs=Decimal(0),
+                        eaten_at=datetime(2026, 9, 20, 18, 0, tzinfo=UTC),
+                    ),
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=cheese.id,
+                        meal_type="snack",
+                        snack_number=1,
+                        weight_grams=Decimal(50),
+                        is_full_serving=False,
+                        calories=Decimal(200),
+                        protein=Decimal("12.5"),
+                        fat=Decimal("16.5"),
+                        carbs=Decimal(1),
+                        eaten_at=datetime(2026, 9, 21, 14, 0, tzinfo=UTC),
+                    ),
+                ]
+            )
             await session.commit()
             await session.refresh(user)
 
@@ -127,5 +168,13 @@ async def test_recommendations_prefer_lean_protein_when_protein_is_missing() -> 
         assert recommendations
         assert recommendations[0].food.name == "Куриная грудка"
         assert recommendations[0].protein > recommendations[0].fat
+        assert {item.food.name for item in recommendations} <= {
+            "Куриная грудка",
+            "Жирный сыр",
+        }
+        assert "Идеальный протеин" not in {
+            item.food.name for item in recommendations
+        }
+        assert "Рис" not in {item.food.name for item in recommendations}
     finally:
         await engine.dispose()

@@ -19,6 +19,7 @@ from app.repositories.food_entries import (
     get_latest_food_entry,
     list_recent_food_entries,
     list_recent_foods,
+    list_used_foods,
 )
 from app.repositories.foods import (
     count_foods,
@@ -339,3 +340,9 @@ async def seed_catalog_foods(
         product.catalog_section = item.catalog_section
     await session.commit()
     return created, updated
+
+
+
+async def used_foods(session: AsyncSession, *, user_id: int) -> list[Food]:
+    """Load all unique active products the user has previously logged."""
+    return await list_used_foods(session, user_id=user_id)
