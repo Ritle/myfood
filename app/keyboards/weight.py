@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -43,6 +45,28 @@ def weight_delete_confirmation(entry_id: int) -> InlineKeyboardMarkup:
                     text="Удалить", callback_data=f"weight:delete_yes:{entry_id}"
                 ),
                 InlineKeyboardButton(text="Отмена", callback_data="weight:delete_no"),
+            ]
+        ]
+    )
+
+
+
+def nutrition_recalculation_confirmation(
+    weight_kg: Decimal,
+) -> InlineKeyboardMarkup:
+    """Confirm nutrition target recalculation for one exact weight."""
+    weight_token = int(Decimal(weight_kg) * 100)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Пересчитать",
+                    callback_data=f"weight:nutrition_recalc_yes:{weight_token}",
+                ),
+                InlineKeyboardButton(
+                    text="Не сейчас",
+                    callback_data=f"weight:nutrition_recalc_no:{weight_token}",
+                ),
             ]
         ]
     )

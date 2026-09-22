@@ -28,6 +28,12 @@ class User(Base):
     daily_protein_target_g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
     daily_fat_target_g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
     daily_carbs_target_g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
+    nutrition_target_weight_kg: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 2), nullable=True
+    )
+    nutrition_recalc_prompt_weight_kg: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 2), nullable=True
+    )
     daily_water_target_ml: Mapped[int | None] = mapped_column(Integer, nullable=True)
     profile_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
