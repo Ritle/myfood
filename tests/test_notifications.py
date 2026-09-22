@@ -5,7 +5,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models import Base, DiaryDay, NotificationLog, NotificationSettings, User
+from app.models import Base, DiaryDay, Food, NotificationLog, NotificationSettings, User
+from app.services.diary import add_diary_entry
 from app.services.notifications import (
     is_quiet_time,
     latest_movement_slot,
@@ -239,5 +240,184 @@ async def test_cycle_stops_after_five_delivery_failures() -> None:
         assert log.attempt_count == 5
         assert log.status == "failed"
         assert log.last_error == "RuntimeError: Telegram unavailable"
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_nutrition_review_waits_ten_minutes_after_latest_meal_entry() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(
+                telegram_id=99,
+                first_name="User",
+                timezone="Europe/Moscow",
+                daily_calorie_target=2100,
+                daily_protein_target_g=140,
+                daily_fat_target_g=70,
+                daily_carbs_target_g=245,
+            )
+            food = Food(
+                name="Каша",
+                name_normalized="каша",
+                calories_per_100g=100,
+                protein_per_100g=5,
+                fat_per_100g=2,
+                carbs_per_100g=15,
+                is_public=True,
+            )
+            session.add_all([user, food])
+            await session.flush()
+            session.add(
+                NotificationSettings(
+                    user_id=user.id,
+                    meal_reminders_enabled=False,
+                    water_reminders_enabled=False,
+                    movement_reminders_enabled=False,
+                    morning_report_enabled=False,
+                    nutrition_monitoring_enabled=True,
+                    nutrition_summary_time=time(16),
+                    quiet_start_time=time(22),
+                    quiet_end_time=time(8),
+                )
+            )
+            session.add(
+                DiaryDay(
+                    user_id=user.id,
+                    logical_date=date(2026, 9, 12),
+                    started_at=datetime(2026, 9, 11, 21, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+            await session.refresh(user)
+            await session.refresh(food)
+
+            await add_diary_entry(
+                session,
+                user_id=user.id,
+                food=food,
+                meal_type="breakfast",
+                weight_grams=100,
+                eaten_at=datetime(2026, 9, 12, 6, 0, tzinfo=UTC),
+            )
+
+        bot = FakeBot()
+        await run_notification_cycle(
+            bot, sessions, now=datetime(2026, 9, 12, 6, 5, tzinfo=UTC)
+        )
+
+        async with sessions() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == 99))
+            food = await session.scalar(select(Food).where(Food.name == "Каша"))
+            assert user is not None and food is not None
+            await add_diary_entry(
+                session,
+                user_id=user.id,
+                food=food,
+                meal_type="breakfast",
+                weight_grams=50,
+                eaten_at=datetime(2026, 9, 12, 6, 8, tzinfo=UTC),
+            )
+
+        await run_notification_cycle(
+            bot, sessions, now=datetime(2026, 9, 12, 6, 10, tzinfo=UTC)
+        )
+        assert bot.messages == []
+
+        await run_notification_cycle(
+            bot, sessions, now=datetime(2026, 9, 12, 6, 18, tzinfo=UTC)
+        )
+
+        async with sessions() as session:
+            logs = list(
+                await session.scalars(
+                    select(NotificationLog).order_by(NotificationLog.id)
+                )
+            )
+
+        assert len(bot.messages) == 1
+        assert "Завтрак — контроль КБЖУ" in bot.messages[0][1]
+        meal_logs = [
+            log for log in logs if log.notification_type == "nutrition_meal:breakfast"
+        ]
+        assert [log.status for log in meal_logs] == ["suppressed", "sent"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nutrition_summary_is_planned_at_configured_time_and_snacks_do_not_get_reviews() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(
+                telegram_id=100,
+                first_name="User",
+                timezone="Europe/Moscow",
+                daily_calorie_target=2100,
+                daily_protein_target_g=140,
+                daily_fat_target_g=70,
+                daily_carbs_target_g=245,
+            )
+            food = Food(
+                name="Яблоко",
+                name_normalized="яблоко",
+                calories_per_100g=50,
+                protein_per_100g=1,
+                fat_per_100g=0,
+                carbs_per_100g=12,
+                is_public=True,
+            )
+            session.add_all([user, food])
+            await session.flush()
+            settings = NotificationSettings(
+                user_id=user.id,
+                meal_reminders_enabled=False,
+                water_reminders_enabled=False,
+                movement_reminders_enabled=False,
+                morning_report_enabled=False,
+                nutrition_monitoring_enabled=True,
+                nutrition_summary_time=time(16),
+                quiet_start_time=time(22),
+                quiet_end_time=time(8),
+            )
+            session.add(settings)
+            session.add(
+                DiaryDay(
+                    user_id=user.id,
+                    logical_date=date(2026, 9, 12),
+                    started_at=datetime(2026, 9, 11, 21, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+            await session.refresh(user)
+            await session.refresh(food)
+            await add_diary_entry(
+                session,
+                user_id=user.id,
+                food=food,
+                meal_type="snack",
+                snack_number=1,
+                weight_grams=100,
+                eaten_at=datetime(2026, 9, 12, 11, 0, tzinfo=UTC),
+            )
+
+            await plan_user_notifications(
+                session,
+                user=user,
+                settings=settings,
+                now=datetime(2026, 9, 12, 13, 5, tzinfo=UTC),
+            )
+            logs = list(await session.scalars(select(NotificationLog)))
+
+        assert [log.notification_type for log in logs] == ["nutrition_summary"]
     finally:
         await engine.dispose()
