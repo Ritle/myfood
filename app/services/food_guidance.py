@@ -62,16 +62,22 @@ def remaining_targets(user: User, entries: list[FoodEntry]) -> dict[str, Decimal
     }
 
 
-def dominant_deficit(user: User, entries: list[FoodEntry]) -> str | None:
-    """Return the macro with the largest remaining share of its daily target."""
+def dominant_deficit(
+    user: User,
+    entries: list[FoodEntry],
+    *,
+    exclude: set[str] | None = None,
+) -> str | None:
+    """Return the largest remaining macro share, optionally excluding metrics."""
     total = summarize_entries(entries)
     candidates: list[tuple[Decimal, str]] = []
+    excluded = exclude or set()
     for key, target, actual in (
         ("protein", user.daily_protein_target_g, total.protein),
         ("fat", user.daily_fat_target_g, total.fat),
         ("carbs", user.daily_carbs_target_g, total.carbs),
     ):
-        if target is None or target <= 0:
+        if key in excluded or target is None or target <= 0:
             continue
         remaining = max(Decimal(0), Decimal(target) - actual)
         if remaining > 0:
@@ -182,7 +188,14 @@ async def recommend_foods_for_today(
     if limit <= 0:
         return []
     remaining = remaining_targets(user, entries)
-    dominant = dominant_deficit(user, entries)
+    current = now or datetime.now(UTC)
+    local_time = current.astimezone(ZoneInfo(user.timezone)).time()
+    late = is_late_food_window(local_time)
+    dominant = dominant_deficit(
+        user,
+        entries,
+        exclude={"carbs"} if late else None,
+    )
     if not remaining or all(value <= 0 for value in remaining.values()):
         return []
 
@@ -193,9 +206,7 @@ async def recommend_foods_for_today(
         for food in candidates
     ]
     ranked = [item for item in ranked if item is not None]
-    current = now or datetime.now(UTC)
-    local_time = current.astimezone(ZoneInfo(user.timezone)).time()
-    if is_late_food_window(local_time):
+    if late:
         ranked = [
             item for item in ranked if not is_too_carb_heavy_for_late_time(item)
         ]
@@ -283,12 +294,26 @@ def format_food_recommendations(
     user: User,
     entries: list[FoodEntry],
     recommendations: list[FoodRecommendation],
+    *,
+    now: datetime | None = None,
 ) -> str:
     """Render ranked catalog suggestions for the current daily remainder."""
-    dominant = dominant_deficit(user, entries)
+    current = now or datetime.now(UTC)
+    late = is_late_food_window(
+        current.astimezone(ZoneInfo(user.timezone)).time()
+    )
+    dominant = dominant_deficit(
+        user,
+        entries,
+        exclude={"carbs"} if late else None,
+    )
     remaining = remaining_targets(user, entries)
     labels = {"protein": "белок", "fat": "жиры", "carbs": "углеводы"}
     lines = ["🍽 Что можно съесть сегодня"]
+    if late:
+        lines.append(
+            "🌙 После 22:00 исключаю слишком углеводные варианты."
+        )
     if dominant is not None:
         lines.append(
             f"Сейчас приоритет — {labels[dominant]} "
