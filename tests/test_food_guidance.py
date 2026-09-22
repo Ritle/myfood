@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -129,6 +130,7 @@ async def test_recommendations_prefer_lean_protein_when_protein_is_missing() -> 
                         protein=Decimal("46.5"),
                         fat=Decimal("5.4"),
                         carbs=Decimal(0),
+                        eaten_at=datetime(2026, 9, 20, 18, 0, tzinfo=UTC),
                     ),
                     FoodEntry(
                         user_id=user.id,
@@ -141,6 +143,7 @@ async def test_recommendations_prefer_lean_protein_when_protein_is_missing() -> 
                         protein=Decimal("12.5"),
                         fat=Decimal("16.5"),
                         carbs=Decimal(1),
+                        eaten_at=datetime(2026, 9, 21, 14, 0, tzinfo=UTC),
                     ),
                 ]
             )
