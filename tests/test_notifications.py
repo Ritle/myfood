@@ -7,6 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import Base, DiaryDay, Food, NotificationLog, NotificationSettings, User
+from app.repositories.notifications import (
+    record_nutrition_meal_review_sent,
+    try_create_notification,
+)
 from app.services.diary import add_diary_entry
 from app.services.notifications import (
     is_quiet_time,
@@ -420,5 +424,59 @@ async def test_nutrition_summary_is_planned_at_configured_time_and_snacks_do_not
             logs = list(await session.scalars(select(NotificationLog)))
 
         assert [log.notification_type for log in logs] == ["nutrition_summary"]
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_explicit_meal_review_suppresses_pending_auto_review_and_claims_latest() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(telegram_id=101, first_name="User")
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
+            local_day = date(2026, 9, 22)
+            stale_time = datetime(2026, 9, 22, 8, 0, tzinfo=UTC)
+            latest_time = datetime(2026, 9, 22, 8, 8, tzinfo=UTC)
+
+            stale = await try_create_notification(
+                session,
+                user_id=user.id,
+                notification_type="nutrition_meal:breakfast",
+                local_date=local_day,
+                deduplication_key=(
+                    f"nutrition_meal:{user.id}:{local_day.isoformat()}:"
+                    f"breakfast:{int(stale_time.timestamp())}"
+                ),
+                scheduled_for=stale_time + timedelta(minutes=10),
+            )
+            assert stale is not None
+
+            explicit = await record_nutrition_meal_review_sent(
+                session,
+                user_id=user.id,
+                local_date=local_day,
+                meal_type="breakfast",
+                latest_eaten_at=latest_time,
+            )
+            logs = list(
+                await session.scalars(
+                    select(NotificationLog).order_by(NotificationLog.id)
+                )
+            )
+
+        assert explicit.status == "sent"
+        assert explicit.notification_type == "nutrition_meal:breakfast"
+        assert explicit.deduplication_key.endswith(
+            f":breakfast:{int(latest_time.timestamp())}"
+        )
+        assert [log.status for log in logs] == ["suppressed", "sent"]
     finally:
         await engine.dispose()
