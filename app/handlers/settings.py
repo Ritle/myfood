@@ -31,6 +31,7 @@ EDIT_PROMPTS = {
     "lunch": "Введите время напоминания об обеде в формате ЧЧ:ММ:",
     "dinner": "Введите время напоминания об ужине в формате ЧЧ:ММ:",
     "report": "Введите время утреннего отчёта в формате ЧЧ:ММ:",
+    "nutrition_summary": "Введите время дневной сводки КБЖУ в формате ЧЧ:ММ:",
     "water_interval": "Введите интервал напоминаний о воде от 30 до 720 минут:",
     "movement_interval": "Введите интервал напоминаний о разминке от 30 до 240 минут:",
     "water_window": "Введите активные часы воды, например 09:00-21:00:",
@@ -64,7 +65,7 @@ async def toggle_setting(
 ) -> None:
     """Toggle a known notification group."""
     name = (callback.data or "").rsplit(":", 1)[-1]
-    if name not in {"meals", "water", "report", "movement"}:
+    if name not in {"meals", "water", "report", "movement", "nutrition"}:
         await callback.answer("Неизвестная настройка", show_alert=True)
         return
     async with session_factory() as session:
@@ -192,6 +193,9 @@ def format_notification_settings(user: User, settings: NotificationSettings) -> 
         f"{clock(settings.water_end_time)}\n"
         f"Разминка: {enabled(settings.movement_reminders_enabled)}, каждые "
         f"{settings.movement_interval_minutes} мин\n"
+        f"Контроль КБЖУ: {enabled(settings.nutrition_monitoring_enabled)}, "
+        f"сводка {clock(settings.nutrition_summary_time)}\n"
+        f"  Проверка завтрака/обеда/ужина через ~10 мин после последней записи\n"
         f"Утренний отчёт: {enabled(settings.morning_report_enabled)}, "
         f"{clock(settings.morning_report_time)}\n"
         f"Тихие часы: {clock(settings.quiet_start_time)}–"
