@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from aiogram.types import User as TelegramUser
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.keyboards.main_menu import main_menu
 from app.keyboards.weight import (
     weight_delete_confirmation,
     weight_entry_actions,
@@ -29,6 +30,12 @@ from app.utils.formatting import format_decimal
 
 router = Router()
 HISTORY_LIMIT = 20
+WEIGHT_MENU_ACTIONS = {
+    "Записать вес",
+    "История веса",
+    "👤 Профиль",
+    "↩️ Главное меню",
+}
 
 
 @router.message(Command("weight"))
@@ -47,7 +54,7 @@ async def open_weight(
     await message.answer(
         f"{format_weight_status(user, history)}\n\n"
         "Введите текущий вес от 30 до 350 кг:",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=weight_menu(),
     )
 
 
@@ -55,10 +62,20 @@ async def open_weight(
 async def begin_weight_add(message: Message, state: FSMContext) -> None:
     """Ask for a new weight measurement."""
     await state.set_state(WeightAdd.value)
-    await message.answer("Введите текущий вес от 30 до 350 кг:", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        "Введите текущий вес от 30 до 350 кг:",
+        reply_markup=weight_menu(),
+    )
 
 
-@router.message(WeightAdd.value)
+@router.message(F.text == "↩️ Главное меню")
+async def return_from_weight_to_main(message: Message, state: FSMContext) -> None:
+    """Leave weight input without interpreting navigation as a weight."""
+    await state.clear()
+    await message.answer("Главное меню", reply_markup=main_menu())
+
+
+@router.message(WeightAdd.value, ~F.text.in_(WEIGHT_MENU_ACTIONS))
 async def save_weight_add(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
