@@ -129,5 +129,7 @@ async def test_profile_weight_changes_create_history_without_duplicates() -> Non
                 Decimal("80.00"),
             ]
             assert updated.current_weight_kg == Decimal("79.00")
+            assert updated.nutrition_target_weight_kg == Decimal("79.00")
+            assert updated.nutrition_recalc_prompt_weight_kg == Decimal("79.00")
     finally:
         await engine.dispose()
