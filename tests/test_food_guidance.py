@@ -178,3 +178,95 @@ async def test_recommendations_prefer_lean_protein_when_protein_is_missing() -> 
         assert "Рис" not in {item.food.name for item in recommendations}
     finally:
         await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_late_guidance_filters_carb_heavy_used_foods() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = user_with_targets()
+            user.timezone = "UTC"
+            chicken = Food(
+                name="Куриная грудка",
+                name_normalized="куриная грудка",
+                calories_per_100g=Decimal(165),
+                protein_per_100g=Decimal(31),
+                fat_per_100g=Decimal("3.6"),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            rice = Food(
+                name="Рис",
+                name_normalized="рис",
+                calories_per_100g=Decimal(130),
+                protein_per_100g=Decimal("2.7"),
+                fat_per_100g=Decimal("0.3"),
+                carbs_per_100g=Decimal(28),
+                is_public=True,
+            )
+            session.add_all([user, chicken, rice])
+            await session.flush()
+            session.add_all(
+                [
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=chicken.id,
+                        meal_type="dinner",
+                        weight_grams=Decimal(150),
+                        is_full_serving=False,
+                        calories=Decimal("247.5"),
+                        protein=Decimal("46.5"),
+                        fat=Decimal("5.4"),
+                        carbs=Decimal(0),
+                        eaten_at=datetime(2026, 9, 20, 18, 0, tzinfo=UTC),
+                    ),
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=rice.id,
+                        meal_type="lunch",
+                        weight_grams=Decimal(200),
+                        is_full_serving=False,
+                        calories=Decimal(260),
+                        protein=Decimal("5.4"),
+                        fat=Decimal("0.6"),
+                        carbs=Decimal(56),
+                        eaten_at=datetime(2026, 9, 21, 12, 0, tzinfo=UTC),
+                    ),
+                ]
+            )
+            await session.commit()
+            await session.refresh(user)
+
+            entries = [
+                diary_entry(
+                    calories=1200,
+                    protein=50,
+                    fat=40,
+                    carbs=100,
+                )
+            ]
+            daytime = await recommend_foods_for_today(
+                session,
+                user=user,
+                entries=entries,
+                limit=5,
+                now=datetime(2026, 9, 22, 18, 0, tzinfo=UTC),
+            )
+            late = await recommend_foods_for_today(
+                session,
+                user=user,
+                entries=entries,
+                limit=5,
+                now=datetime(2026, 9, 22, 22, 30, tzinfo=UTC),
+            )
+
+        assert "Рис" in {item.food.name for item in daytime}
+        assert "Рис" not in {item.food.name for item in late}
+        assert "Куриная грудка" in {item.food.name for item in late}
+    finally:
+        await engine.dispose()

@@ -1,4 +1,6 @@
+from datetime import UTC, datetime, time
 from decimal import ROUND_HALF_UP, Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,6 +8,11 @@ from app.models import Food, FoodEntry, User
 from app.services.diary import summarize_entries
 from app.services.foods import used_foods
 from app.utils.formatting import format_decimal
+
+LATE_FOOD_START = time(22)
+LATE_FOOD_END = time(5)
+LATE_CARB_MIN_GRAMS = Decimal(20)
+LATE_CARB_ENERGY_SHARE = Decimal("0.55")
 
 
 class FoodRecommendation:
@@ -55,16 +62,22 @@ def remaining_targets(user: User, entries: list[FoodEntry]) -> dict[str, Decimal
     }
 
 
-def dominant_deficit(user: User, entries: list[FoodEntry]) -> str | None:
-    """Return the macro with the largest remaining share of its daily target."""
+def dominant_deficit(
+    user: User,
+    entries: list[FoodEntry],
+    *,
+    exclude: set[str] | None = None,
+) -> str | None:
+    """Return the largest remaining macro share, optionally excluding metrics."""
     total = summarize_entries(entries)
     candidates: list[tuple[Decimal, str]] = []
+    excluded = exclude or set()
     for key, target, actual in (
         ("protein", user.daily_protein_target_g, total.protein),
         ("fat", user.daily_fat_target_g, total.fat),
         ("carbs", user.daily_carbs_target_g, total.carbs),
     ):
-        if target is None or target <= 0:
+        if key in excluded or target is None or target <= 0:
             continue
         remaining = max(Decimal(0), Decimal(target) - actual)
         if remaining > 0:
@@ -169,12 +182,20 @@ async def recommend_foods_for_today(
     user: User,
     entries: list[FoodEntry],
     limit: int = 5,
+    now: datetime | None = None,
 ) -> list[FoodRecommendation]:
     """Rank only foods previously logged by the user against remaining targets."""
     if limit <= 0:
         return []
     remaining = remaining_targets(user, entries)
-    dominant = dominant_deficit(user, entries)
+    current = now or datetime.now(UTC)
+    local_time = current.astimezone(ZoneInfo(user.timezone)).time()
+    late = is_late_food_window(local_time)
+    dominant = dominant_deficit(
+        user,
+        entries,
+        exclude={"carbs"} if late else None,
+    )
     if not remaining or all(value <= 0 for value in remaining.values()):
         return []
 
@@ -185,6 +206,10 @@ async def recommend_foods_for_today(
         for food in candidates
     ]
     ranked = [item for item in ranked if item is not None]
+    if late:
+        ranked = [
+            item for item in ranked if not is_too_carb_heavy_for_late_time(item)
+        ]
     ranked.sort(key=lambda item: (-item.score, item.food.name.casefold()))
     return ranked[:limit]
 
@@ -269,12 +294,26 @@ def format_food_recommendations(
     user: User,
     entries: list[FoodEntry],
     recommendations: list[FoodRecommendation],
+    *,
+    now: datetime | None = None,
 ) -> str:
     """Render ranked catalog suggestions for the current daily remainder."""
-    dominant = dominant_deficit(user, entries)
+    current = now or datetime.now(UTC)
+    late = is_late_food_window(
+        current.astimezone(ZoneInfo(user.timezone)).time()
+    )
+    dominant = dominant_deficit(
+        user,
+        entries,
+        exclude={"carbs"} if late else None,
+    )
     remaining = remaining_targets(user, entries)
     labels = {"protein": "белок", "fat": "жиры", "carbs": "углеводы"}
     lines = ["🍽 Что можно съесть сегодня"]
+    if late:
+        lines.append(
+            "🌙 После 22:00 исключаю слишком углеводные варианты."
+        )
     if dominant is not None:
         lines.append(
             f"Сейчас приоритет — {labels[dominant]} "
@@ -310,3 +349,17 @@ def format_food_recommendations(
         ]
     )
     return "\n".join(lines)
+
+
+
+def is_late_food_window(value: time) -> bool:
+    """Return whether food guidance is being requested late at night."""
+    return value >= LATE_FOOD_START or value < LATE_FOOD_END
+
+
+def is_too_carb_heavy_for_late_time(item: FoodRecommendation) -> bool:
+    """Filter substantial portions whose energy is dominated by carbohydrates."""
+    if item.calories <= 0 or item.carbs < LATE_CARB_MIN_GRAMS:
+        return False
+    carb_energy_share = item.carbs * Decimal(4) / item.calories
+    return carb_energy_share >= LATE_CARB_ENERGY_SHARE
