@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry, User
 from app.repositories.foods import list_visible_food_candidates
-from app.services.diary import DiarySummary, summarize_entries
+from app.services.diary import summarize_entries
 from app.services.foods import favorite_foods, recent_foods
 from app.utils.formatting import format_decimal
 
@@ -120,8 +120,10 @@ def format_remaining_guidance(user: User, entries: list[FoodEntry]) -> str | Non
         lines.extend(
             [
                 "",
-                f"Ориентир: сейчас сильнее всего не хватает — {labels[dominant]} "
-                f"(~{format_decimal(remaining)} г).",
+                (
+                    f"Ориентир: сейчас сильнее всего не хватает — {labels[dominant]} "
+                    f"(~{format_decimal(remaining)} г)."
+                ),
             ]
         )
 
@@ -306,17 +308,21 @@ def format_food_recommendations(
         lines.extend(
             [
                 f"{index}. {item.food.name} — {item.amount_label}",
-                f"   ≈ {format_decimal(item.calories)} ккал · "
-                f"Б {format_decimal(item.protein)} · "
-                f"Ж {format_decimal(item.fat)} · "
-                f"У {format_decimal(item.carbs)}",
+                (
+                    f"   ≈ {format_decimal(item.calories)} ккал · "
+                    f"Б {format_decimal(item.protein)} · "
+                    f"Ж {format_decimal(item.fat)} · "
+                    f"У {format_decimal(item.carbs)}"
+                ),
             ]
         )
     lines.extend(
         [
             "",
-            "Это ориентировочный подбор по текущему остатку КБЖУ, "
-            "а не обязательное меню.",
+            (
+                "Это ориентировочный подбор по текущему остатку КБЖУ, "
+                "а не обязательное меню."
+            ),
         ]
     )
     return "\n".join(lines)
