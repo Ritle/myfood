@@ -1,4 +1,5 @@
 from datetime import UTC
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
