@@ -3,9 +3,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry, User
-from app.repositories.foods import list_visible_food_candidates
 from app.services.diary import summarize_entries
-from app.services.foods import favorite_foods, recent_foods
+from app.services.foods import used_foods
 from app.utils.formatting import format_decimal
 
 
@@ -171,7 +170,7 @@ async def recommend_foods_for_today(
     entries: list[FoodEntry],
     limit: int = 5,
 ) -> list[FoodRecommendation]:
-    """Rank visible catalog foods against the user's current remaining targets."""
+    """Rank only foods previously logged by the user against remaining targets."""
     if limit <= 0:
         return []
     remaining = remaining_targets(user, entries)
@@ -179,29 +178,11 @@ async def recommend_foods_for_today(
     if not remaining or all(value <= 0 for value in remaining.values()):
         return []
 
-    candidates: list[Food] = []
-    candidates.extend(await recent_foods(session, user_id=user.id, limit=30))
-    candidates.extend(await favorite_foods(session, user_id=user.id))
-    candidates.extend(
-        await list_visible_food_candidates(
-            session,
-            user_id=user.id,
-            nutrient=dominant or "protein",
-            limit=250,
-        )
-    )
-
-    unique: list[Food] = []
-    seen: set[int] = set()
-    for food in candidates:
-        if food.id is None or food.id in seen:
-            continue
-        seen.add(food.id)
-        unique.append(food)
+    candidates = await used_foods(session, user_id=user.id)
 
     ranked = [
         recommendation_for_food(food, remaining=remaining, dominant=dominant)
-        for food in unique
+        for food in candidates
     ]
     ranked = [item for item in ranked if item is not None]
     ranked.sort(key=lambda item: (-item.score, item.food.name.casefold()))
@@ -301,7 +282,10 @@ def format_food_recommendations(
         )
     lines.append("")
     if not recommendations:
-        lines.append("Подходящих вариантов в каталоге не найдено.")
+        lines.append(
+            "Среди продуктов и блюд, которые вы уже добавляли раньше, "
+            "подходящих вариантов не найдено."
+        )
         return "\n".join(lines)
 
     for index, item in enumerate(recommendations, start=1):
