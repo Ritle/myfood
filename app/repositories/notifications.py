@@ -149,3 +149,56 @@ async def suppress_pending_meal_notifications(
         .values(status="suppressed")
     )
     await session.commit()
+
+
+
+async def record_nutrition_meal_review_sent(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    local_date: date,
+    meal_type: str,
+    latest_eaten_at: datetime,
+) -> NotificationLog:
+    """Record an explicit meal review and suppress pending automatic duplicates."""
+    notification_type = f"nutrition_meal:{meal_type}"
+    deduplication_key = (
+        f"nutrition_meal:{user_id}:{local_date.isoformat()}:"
+        f"{meal_type}:{int(latest_eaten_at.timestamp())}"
+    )
+
+    await session.execute(
+        update(NotificationLog)
+        .where(
+            NotificationLog.user_id == user_id,
+            NotificationLog.local_date == local_date,
+            NotificationLog.status == "pending",
+            NotificationLog.notification_type == notification_type,
+        )
+        .values(status="suppressed")
+    )
+
+    log = await session.scalar(
+        select(NotificationLog).where(
+            NotificationLog.deduplication_key == deduplication_key
+        )
+    )
+    now = datetime.now(UTC)
+    if log is None:
+        log = NotificationLog(
+            user_id=user_id,
+            notification_type=notification_type,
+            local_date=local_date,
+            deduplication_key=deduplication_key,
+            status="sent",
+            scheduled_for=now,
+            sent_at=now,
+        )
+        session.add(log)
+    else:
+        log.status = "sent"
+        log.sent_at = now
+        log.last_error = None
+    await session.commit()
+    await session.refresh(log)
+    return log

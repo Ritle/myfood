@@ -13,9 +13,21 @@ from app.utils.formatting import format_decimal
 from app.utils.portions import QUICK_PORTIONS
 
 FINISH_DIARY_ADDING_TEXT = "✅ Завершить добавление"
+FINISH_MEAL_TEXTS = {
+    "breakfast": "✅ Завершить завтрак",
+    "lunch": "✅ Завершить обед",
+    "dinner": "✅ Завершить ужин",
+}
 
 
-def diary_menu(*, adding: bool = False) -> ReplyKeyboardMarkup:
+def finish_diary_adding_text(meal_type: str | None) -> str:
+    """Return a meal-specific finish label for main meals."""
+    return FINISH_MEAL_TEXTS.get(meal_type or "", FINISH_DIARY_ADDING_TEXT)
+
+
+def diary_menu(
+    *, adding: bool = False, meal_type: str | None = None
+) -> ReplyKeyboardMarkup:
     """Build meal selection and diary navigation.
 
     During an active meal-entry session, show an explicit finish action so
@@ -32,7 +44,9 @@ def diary_menu(*, adding: bool = False) -> ReplyKeyboardMarkup:
         ],
     ]
     if adding:
-        rows.append([KeyboardButton(text=FINISH_DIARY_ADDING_TEXT)])
+        rows.append(
+            [KeyboardButton(text=finish_diary_adding_text(meal_type))]
+        )
     rows.extend(
         [
             [KeyboardButton(text="📋 Дневник за сегодня")],
@@ -43,7 +57,7 @@ def diary_menu(*, adding: bool = False) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def diary_portion_keyboard() -> ReplyKeyboardMarkup:
+def diary_portion_keyboard(meal_type: str | None = None) -> ReplyKeyboardMarkup:
     """Offer common approximate portions while keeping free-form gram input."""
     labels = [label for label, _ in QUICK_PORTIONS]
     rows = [
@@ -52,7 +66,7 @@ def diary_portion_keyboard() -> ReplyKeyboardMarkup:
     ]
     if len(labels) % 2:
         rows.append([KeyboardButton(text=labels[-1])])
-    rows.append([KeyboardButton(text=FINISH_DIARY_ADDING_TEXT)])
+    rows.append([KeyboardButton(text=finish_diary_adding_text(meal_type))])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,

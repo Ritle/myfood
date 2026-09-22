@@ -9,6 +9,7 @@ from app.keyboards.diary import (
     FINISH_DIARY_ADDING_TEXT,
     diary_menu,
     diary_portion_keyboard,
+    finish_diary_adding_text,
 )
 from app.models import Base, DiaryDay, Food, User
 from app.services.diary import (
@@ -401,3 +402,25 @@ async def test_numbered_snacks_stay_separate_inside_one_day() -> None:
             assert text.count("Подытог:") == 2
     finally:
         await engine.dispose()
+
+
+
+def test_main_meals_have_explicit_finish_buttons_and_snack_keeps_generic_finish() -> None:
+    assert finish_diary_adding_text("breakfast") == "✅ Завершить завтрак"
+    assert finish_diary_adding_text("lunch") == "✅ Завершить обед"
+    assert finish_diary_adding_text("dinner") == "✅ Завершить ужин"
+    assert finish_diary_adding_text("snack") == FINISH_DIARY_ADDING_TEXT
+
+    breakfast_buttons = {
+        button.text
+        for row in diary_menu(adding=True, meal_type="breakfast").keyboard
+        for button in row
+    }
+    snack_buttons = {
+        button.text
+        for row in diary_portion_keyboard("snack").keyboard
+        for button in row
+    }
+
+    assert "✅ Завершить завтрак" in breakfast_buttons
+    assert FINISH_DIARY_ADDING_TEXT in snack_buttons
