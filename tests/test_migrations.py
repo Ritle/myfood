@@ -44,6 +44,9 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         food_entry_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(food_entries)").fetchall()
         }
+        user_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
         template_item_columns = {
             row[1]
             for row in connection.execute(
@@ -51,7 +54,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
             ).fetchall()
         }
 
-    assert revision == ("0017_nutrition_monitoring",)
+    assert revision == ("0018_weight_nutrition_recalc",)
     assert {
         "users",
         "foods",
@@ -71,6 +74,10 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "nutrition_monitoring_enabled",
         "nutrition_summary_time",
     } <= notification_columns
+    assert {
+        "nutrition_target_weight_kg",
+        "nutrition_recalc_prompt_weight_kg",
+    } <= user_columns
     assert {"catalog_section", "nutrition_basis"} <= food_columns
     assert {"is_full_serving", "snack_number"} <= food_entry_columns
     assert "is_full_serving" in template_item_columns
