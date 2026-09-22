@@ -52,6 +52,7 @@ def build_nutrition_recalculation(
         or user.height_cm is None
         or user.activity_level is None
         or user.goal is None
+        or user.daily_calorie_target is None
     ):
         return None
 
