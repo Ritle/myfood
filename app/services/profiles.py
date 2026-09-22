@@ -23,6 +23,9 @@ async def persist_profile(
     previous_weight = existing.current_weight_kg if existing is not None else None
     user = await save_profile(session, telegram_id=telegram_id, profile=profile)
     current_weight = user.current_weight_kg
+    if current_weight is not None:
+        user.nutrition_target_weight_kg = current_weight
+        user.nutrition_recalc_prompt_weight_kg = current_weight
     if current_weight is not None and current_weight != previous_weight:
         session.add(
             WeightEntry(
