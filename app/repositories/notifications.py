@@ -164,7 +164,7 @@ async def record_nutrition_meal_review_sent(
     notification_type = f"nutrition_meal:{meal_type}"
     deduplication_key = (
         f"nutrition_meal:{user_id}:{local_date.isoformat()}:"
-        f"{int(latest_eaten_at.timestamp())}"
+        f"{meal_type}:{int(latest_eaten_at.timestamp())}"
     )
 
     await session.execute(
