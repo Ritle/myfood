@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.keyboards.diary import (
     FINISH_DIARY_ADDING_TEXT,
+    FINISH_MEAL_TEXTS,
     delete_confirmation,
     diary_batch_confirmation,
     diary_entry_actions,
@@ -22,10 +23,14 @@ from app.keyboards.diary import (
     diary_portion_keyboard,
     diary_recent_food_results,
     diary_source_actions,
+    finish_diary_adding_text,
     meal_template_delete_confirmation,
 )
 from app.models import Food, FoodEntry, User
-from app.repositories.notifications import mark_notification_sent
+from app.repositories.notifications import (
+    mark_notification_sent,
+    record_nutrition_meal_review_sent,
+)
 from app.repositories.users import get_or_create_user
 from app.services.calorie_alerts import CalorieAlert, claim_calorie_alert
 from app.services.days import get_or_create_active_diary_day
@@ -52,6 +57,10 @@ from app.services.foods import (
     search_foods,
     search_foods_page,
 )
+from app.services.nutrition_monitoring import (
+    format_meal_review,
+    latest_meal_eaten_at,
+)
 from app.services.meal_templates import (
     MAX_MEAL_TEMPLATE_ITEMS,
     delete_owned_meal_template,
@@ -71,12 +80,16 @@ from app.utils.portions import parse_portion_input
 
 router = Router()
 MEAL_BUTTONS = {label: meal_type for meal_type, label in MEAL_LABELS.items()}
+DIARY_FINISH_TEXTS = {
+    FINISH_DIARY_ADDING_TEXT,
+    *FINISH_MEAL_TEXTS.values(),
+}
 DIARY_NAVIGATION_TEXTS = {
     "📋 Дневник за сегодня",
     "📚 Каталог продуктов",
     "↩️ Главное меню",
     "🌙 Завершить день",
-    FINISH_DIARY_ADDING_TEXT,
+    *DIARY_FINISH_TEXTS,
 }
 
 
@@ -115,7 +128,7 @@ async def open_diary(
         f"Предлагаю записать в «{meal_label(meal_type, snack_number)}». "
         "Введите продукт или бренд; "
         "при необходимости смените прием пищи кнопкой ниже.",
-        reply_markup=diary_menu(adding=True),
+        reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await message.answer(
         "Можно также выбрать продукт из готового списка:",
@@ -149,7 +162,7 @@ async def choose_meal(
         f"Выбрано «{meal_label(meal_type, snack_number)}». "
         "Введите продукт или бренд; "
         "при необходимости смените прием пищи кнопкой ниже.",
-        reply_markup=diary_menu(adding=True),
+        reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await message.answer(
         "Можно также выбрать продукт из готового списка:",
@@ -157,23 +170,64 @@ async def choose_meal(
     )
 
 
-@router.message(F.text == FINISH_DIARY_ADDING_TEXT)
-async def finish_diary_addition(message: Message, state: FSMContext) -> None:
-    """Finish the current meal-entry session without changing the logical day."""
+@router.message(F.text.in_(DIARY_FINISH_TEXTS))
+async def finish_diary_addition(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Finish the current meal and immediately analyze a main meal."""
     data = await state.get_data()
     meal_type = data.get("meal_type")
-    await state.clear()
     snack_number = data.get("snack_number")
+    analysis: str | None = None
+
+    if (
+        message.from_user is not None
+        and meal_type in FINISH_MEAL_TEXTS
+    ):
+        async with session_factory() as session:
+            user = await ensure_user(session, message.from_user)
+            day = await get_or_create_active_diary_day(session, user=user)
+            entries = await get_entries_for_day(
+                session,
+                user_id=user.id,
+                day=day.logical_date,
+                timezone_name=user.timezone,
+            )
+            latest = latest_meal_eaten_at(entries, meal_type)
+            if latest is not None:
+                analysis = format_meal_review(
+                    user,
+                    entries,
+                    meal_type=meal_type,
+                )
+                if analysis is not None:
+                    await record_nutrition_meal_review_sent(
+                        session,
+                        user_id=user.id,
+                        local_date=day.logical_date,
+                        meal_type=meal_type,
+                        latest_eaten_at=latest,
+                    )
+
+    await state.clear()
     label = (
         meal_label(meal_type, snack_number)
         if meal_type in MEAL_LABELS
         else None
     )
     text = (
-        f"✅ Добавление в «{label}» завершено."
-        if label is not None
-        else "✅ Добавление питания завершено."
+        f"✅ «{label}» завершён."
+        if meal_type in FINISH_MEAL_TEXTS and label is not None
+        else (
+            f"✅ Добавление в «{label}» завершено."
+            if label is not None
+            else "✅ Добавление питания завершено."
+        )
     )
+    if analysis is not None:
+        text = f"{text}\n\n{analysis}"
     await message.answer(text, reply_markup=diary_menu())
 
 
@@ -371,7 +425,7 @@ async def cancel_food_batch(callback: CallbackQuery, state: FSMContext) -> None:
             pass
         await callback.message.answer(
             "Список отменён. Введите продукты заново.",
-            reply_markup=diary_menu(adding=True),
+            reply_markup=diary_menu(adding=True, meal_type=meal_type),
         )
     await callback.answer("Отменено")
 
@@ -453,7 +507,7 @@ async def confirm_food_batch(
         await state.update_data(batch_items=None, meal_type=meal_type)
         await callback.message.answer(
             "Один из продуктов стал недоступен. Проверьте названия и отправьте список заново.",
-            reply_markup=diary_menu(adding=True),
+            reply_markup=diary_menu(adding=True, meal_type=meal_type),
         )
         await callback.answer("Список устарел", show_alert=True)
         return
@@ -466,8 +520,8 @@ async def confirm_food_batch(
     await callback.message.answer(
         f"Добавлено продуктов: {len(entries)}.\n\n{format_summary(current_entries)}\n\n"
         f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
-        "или нажмите «✅ Завершить добавление».",
-        reply_markup=diary_menu(adding=True),
+        f"или нажмите «{finish_diary_adding_text(meal_type)}».",
+        reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await callback.answer("Добавлено")
     await deliver_calorie_alert(callback.message, alert, settings, session_factory)
@@ -766,8 +820,8 @@ async def repeat_recent_food_portion(
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
         f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
-        "или нажмите «✅ Завершить добавление».",
-        reply_markup=diary_menu(adding=True),
+        f"или нажмите «{finish_diary_adding_text(meal_type)}».",
+        reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await callback.answer("Добавлено")
     await deliver_calorie_alert(callback.message, alert, settings, session_factory)
@@ -836,8 +890,8 @@ async def select_diary_food(
                 f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
                 f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
                 f"Добавьте следующую позицию в «{meal_label(meal_type, snack_number)}» "
-                "или нажмите «✅ Завершить добавление».",
-                reply_markup=diary_menu(adding=True),
+                f"или нажмите «{finish_diary_adding_text(meal_type)}».",
+                reply_markup=diary_menu(adding=True, meal_type=meal_type),
             )
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
@@ -854,7 +908,7 @@ async def select_diary_food(
         await callback.message.answer(
             f"Выберите порцию для «{food.name}» или введите точный вес в граммах.\n"
             "Меры приблизительные: вес зависит от продукта.",
-            reply_markup=diary_portion_keyboard(),
+            reply_markup=diary_portion_keyboard(meal_type),
         )
     await callback.answer()
 
@@ -889,7 +943,10 @@ async def enter_portion_weight(
                 await state.clear()
             await message.answer(
                 "Продукт больше недоступен. Выберите другой.",
-                reply_markup=diary_menu(adding=meal_type in MEAL_LABELS),
+                reply_markup=diary_menu(
+                    adding=meal_type in MEAL_LABELS,
+                    meal_type=meal_type if meal_type in MEAL_LABELS else None,
+                ),
             )
             return
         meal_type = data["meal_type"]
@@ -927,8 +984,8 @@ async def enter_portion_weight(
         f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
         f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
         f"Добавьте следующий продукт в «{meal_label(meal_type, snack_number)}» "
-        "или нажмите «✅ Завершить добавление».",
-        reply_markup=diary_menu(adding=True),
+        f"или нажмите «{finish_diary_adding_text(meal_type)}».",
+        reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await deliver_calorie_alert(message, alert, settings, session_factory)
 
