@@ -102,3 +102,44 @@ async def get_food_by_source(session: AsyncSession, *, source: str, source_ref: 
     return await session.scalar(
         select(Food).where(Food.source == source, Food.source_ref == source_ref)
     )
+
+
+
+async def list_visible_food_candidates(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    nutrient: str,
+    limit: int = 250,
+) -> list[Food]:
+    """Return nutrient-dense visible foods for recommendation scoring."""
+    columns = {
+        "protein": Food.protein_per_100g,
+        "fat": Food.fat_per_100g,
+        "carbs": Food.carbs_per_100g,
+    }
+    column = columns.get(nutrient)
+    if column is None:
+        raise ValueError("unknown recommendation nutrient")
+    if not 1 <= limit <= 1000:
+        raise ValueError("invalid recommendation limit")
+
+    visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
+    density = column / func.nullif(Food.calories_per_100g, 0)
+    result = await session.scalars(
+        select(Food)
+        .where(
+            Food.is_archived.is_(False),
+            visibility,
+            Food.calories_per_100g > 0,
+            column > 0,
+        )
+        .order_by(
+            (Food.created_by_user_id == user_id).desc(),
+            density.desc(),
+            column.desc(),
+            Food.name,
+        )
+        .limit(limit)
+    )
+    return list(result)
