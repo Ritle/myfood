@@ -120,6 +120,10 @@ async def list_due_notifications(
                     "water",
                     "movement",
                     "morning_report",
+                    "nutrition_meal:breakfast",
+                    "nutrition_meal:lunch",
+                    "nutrition_meal:dinner",
+                    "nutrition_summary",
                 ]
             ),
         )

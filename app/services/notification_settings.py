@@ -14,12 +14,14 @@ TIME_FIELDS = {
     "lunch": "lunch_time",
     "dinner": "dinner_time",
     "report": "morning_report_time",
+    "nutrition_summary": "nutrition_summary_time",
 }
 TOGGLE_FIELDS = {
     "meals": "meal_reminders_enabled",
     "water": "water_reminders_enabled",
     "report": "morning_report_enabled",
     "movement": "movement_reminders_enabled",
+    "nutrition": "nutrition_monitoring_enabled",
 }
 
 

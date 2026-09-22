@@ -9,6 +9,7 @@ from app.services.notification_settings import (
     parse_time_range,
     parse_timezone,
     set_movement_interval,
+    set_notification_time,
     toggle_notification_setting,
 )
 
@@ -54,5 +55,37 @@ async def test_movement_reminder_can_be_toggled_and_interval_is_bounded() -> Non
                     await set_movement_interval(
                         session, settings=settings, minutes=minutes
                     )
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_nutrition_monitoring_can_be_toggled_and_summary_time_changed() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(telegram_id=502, first_name="User")
+            session.add(user)
+            await session.flush()
+            settings = NotificationSettings(user_id=user.id)
+            session.add(settings)
+            await session.commit()
+
+            settings = await toggle_notification_setting(
+                session, settings=settings, name="nutrition"
+            )
+            assert settings.nutrition_monitoring_enabled is False
+
+            settings = await set_notification_time(
+                session,
+                settings=settings,
+                name="nutrition_summary",
+                value=time(16, 30),
+            )
+            assert settings.nutrition_summary_time == time(16, 30)
     finally:
         await engine.dispose()

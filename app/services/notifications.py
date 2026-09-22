@@ -22,6 +22,15 @@ from app.repositories.notifications import (
 )
 from app.services.days import get_or_create_active_diary_day
 from app.services.diary import MEAL_LABELS, get_entries_for_day
+from app.services.nutrition_monitoring import (
+    MEAL_REVIEW_DELAY,
+    MEAL_REVIEW_GRACE,
+    as_utc,
+    format_day_checkpoint,
+    format_meal_review,
+    has_nutrition_targets,
+    latest_meal_eaten_at,
+)
 from app.services.today import format_today
 from app.services.water import get_water_for_day, total_water
 
@@ -115,6 +124,49 @@ async def plan_user_notifications(
                 local_date=local_day,
                 deduplication_key=f"meal:{user.id}:{local_day.isoformat()}:{meal_type}",
                 scheduled_for=scheduled_local.astimezone(UTC),
+            )
+
+    if settings.nutrition_monitoring_enabled and has_nutrition_targets(user):
+        nutrition_entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=local_day,
+            timezone_name=user.timezone,
+        )
+        for meal_type in MEAL_TIMES:
+            latest = latest_meal_eaten_at(nutrition_entries, meal_type)
+            if latest is None:
+                continue
+            scheduled_for = latest + MEAL_REVIEW_DELAY
+            if now >= scheduled_for + MEAL_REVIEW_GRACE:
+                continue
+            await try_create_notification(
+                session,
+                user_id=user.id,
+                notification_type=f"nutrition_meal:{meal_type}",
+                local_date=local_day,
+                deduplication_key=(
+                    f"nutrition_meal:{user.id}:{local_day.isoformat()}:"
+                    f"{meal_type}:{int(latest.timestamp())}"
+                ),
+                scheduled_for=scheduled_for,
+            )
+
+        checkpoint_local = event_is_due(
+            local_now,
+            scheduled_time=settings.nutrition_summary_time,
+            grace=REPORT_GRACE,
+        )
+        if checkpoint_local is not None:
+            await try_create_notification(
+                session,
+                user_id=user.id,
+                notification_type="nutrition_summary",
+                local_date=local_day,
+                deduplication_key=(
+                    f"nutrition_summary:{user.id}:{local_day.isoformat()}"
+                ),
+                scheduled_for=checkpoint_local.astimezone(UTC),
             )
 
     if settings.water_reminders_enabled:
@@ -271,6 +323,45 @@ async def build_notification(
             f"{label}: в дневнике пока нет записей. Добавим прием пищи?",
             meal_reminder_actions(log.id, meal_type),
         )
+    if log.notification_type.startswith("nutrition_meal:"):
+        if not settings.nutrition_monitoring_enabled or not has_nutrition_targets(user):
+            return None, None
+        meal_type = log.notification_type.rsplit(":", 1)[-1]
+        if meal_type not in MEAL_TIMES:
+            return None, None
+        entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=log.local_date,
+            timezone_name=user.timezone,
+        )
+        latest = latest_meal_eaten_at(entries, meal_type)
+        if latest is None:
+            return None, None
+        expected_scheduled = latest + MEAL_REVIEW_DELAY
+        scheduled_for = as_utc(log.scheduled_for)
+        if abs((expected_scheduled - scheduled_for).total_seconds()) > 1:
+            return None, None
+        return format_meal_review(
+            user, entries, meal_type=meal_type
+        ), None
+
+    if log.notification_type == "nutrition_summary":
+        if not settings.nutrition_monitoring_enabled or not has_nutrition_targets(user):
+            return None, None
+        entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=log.local_date,
+            timezone_name=user.timezone,
+        )
+        return format_day_checkpoint(
+            user,
+            entries,
+            settings=settings,
+            checkpoint=settings.nutrition_summary_time,
+        ), None
+
     if log.notification_type == "water":
         if not settings.water_reminders_enabled:
             return None, None

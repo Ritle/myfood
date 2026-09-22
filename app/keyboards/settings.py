@@ -61,6 +61,19 @@ def notification_settings_keyboard(
             ],
             [
                 InlineKeyboardButton(
+                    text=f"Контроль КБЖУ: {status(settings.nutrition_monitoring_enabled)}",
+                    callback_data="settings:toggle:nutrition",
+                )
+            ],
+            [
+                time_button(
+                    "Сводка КБЖУ",
+                    "nutrition_summary",
+                    settings.nutrition_summary_time,
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=f"Утренний отчёт: {status(settings.morning_report_enabled)}",
                     callback_data="settings:toggle:report",
                 ),
