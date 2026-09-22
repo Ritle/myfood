@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -75,6 +77,7 @@ async def suggest_food_for_today(
             session,
             user=user,
             entries=entries,
+            now=datetime.now(UTC),
         )
         text = format_food_recommendations(user, entries, recommendations)
     await message.answer(
