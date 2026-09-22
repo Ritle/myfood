@@ -10,12 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.keyboards.main_menu import main_menu
 from app.keyboards.weight import (
+    nutrition_recalculation_confirmation,
     weight_delete_confirmation,
     weight_entry_actions,
     weight_menu,
 )
 from app.models import User, WeightEntry
 from app.repositories.users import get_or_create_user
+from app.services.nutrition_recalculation import (
+    NutritionRecalculation,
+    apply_nutrition_recalculation,
+    build_nutrition_recalculation,
+    mark_nutrition_recalculation_prompted,
+    nutrition_recalculation_due,
+)
 from app.services.weight import (
     add_weight,
     change_weight,
@@ -86,16 +94,75 @@ async def save_weight_add(
         return
     if message.from_user is None:
         return
+    recalculation: NutritionRecalculation | None = None
     async with session_factory() as session:
         user = await ensure_user(session, message.from_user)
         await add_weight(session, user=user, weight_kg=weight_kg)
         history = await get_weight_history(session, user_id=user.id)
+        if nutrition_recalculation_due(user, weight_kg):
+            recalculation = build_nutrition_recalculation(user, weight_kg)
+            if recalculation is not None:
+                await mark_nutrition_recalculation_prompted(
+                    session,
+                    user=user,
+                    weight_kg=weight_kg,
+                )
     await state.clear()
     await message.answer(
         f"Вес записан: {format_decimal(weight_kg)} кг.\n\n"
         f"{format_weight_status(user, history)}",
         reply_markup=weight_menu(),
     )
+    if recalculation is not None:
+        await message.answer(
+            format_nutrition_recalculation_prompt(recalculation),
+            reply_markup=nutrition_recalculation_confirmation(weight_kg),
+        )
+
+
+@router.callback_query(F.data.startswith("weight:nutrition_recalc_yes:"))
+async def confirm_nutrition_recalculation(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Apply new nutrition targets only for the still-current weight."""
+    expected_weight = parse_weight_token(callback.data)
+    if expected_weight is None:
+        await callback.answer("Некорректное предложение", show_alert=True)
+        return
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        result = await apply_nutrition_recalculation(
+            session,
+            user=user,
+            expected_weight_kg=expected_weight,
+        )
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        if result is None:
+            await callback.message.answer(
+                "Вес или параметры профиля уже изменились. "
+                "Старое предложение пересчёта не применено.",
+                reply_markup=weight_menu(),
+            )
+        else:
+            await callback.message.answer(
+                format_nutrition_recalculation_applied(result),
+                reply_markup=weight_menu(),
+            )
+    await callback.answer("Нормы обновлены" if result is not None else "Предложение устарело")
+
+
+@router.callback_query(F.data.startswith("weight:nutrition_recalc_no:"))
+async def decline_nutrition_recalculation(callback: CallbackQuery) -> None:
+    """Keep current targets; the prompt anchor was recorded when it was shown."""
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(
+            "Текущие нормы оставлены без изменений. "
+            "Повторно предложу пересчёт после следующего заметного изменения веса."
+        )
+    await callback.answer("Оставляю текущие нормы")
 
 
 @router.message(F.text == "История веса")
@@ -302,3 +369,49 @@ def parse_callback_id(data: str | None) -> int | None:
     except (IndexError, ValueError):
         return None
     return value if value > 0 else None
+
+
+
+def format_nutrition_recalculation_prompt(
+    result: NutritionRecalculation,
+) -> str:
+    """Show the user exactly what will change before confirmation."""
+    old_calories = result.old_calories if result.old_calories is not None else "—"
+    old_protein = (
+        format_decimal(result.old_protein) if result.old_protein is not None else "—"
+    )
+    old_fat = format_decimal(result.old_fat) if result.old_fat is not None else "—"
+    old_carbs = (
+        format_decimal(result.old_carbs) if result.old_carbs is not None else "—"
+    )
+    return (
+        "⚖️ Вес заметно изменился. Пересчитать дневную норму?\n\n"
+        f"Вес для нового расчёта: {format_decimal(result.weight_kg)} кг\n\n"
+        f"Сейчас: {old_calories} ккал · "
+        f"Б {old_protein} · Ж {old_fat} · У {old_carbs}\n"
+        f"После пересчёта: {result.calories} ккал · "
+        f"Б {result.protein} · Ж {result.fat} · У {result.carbs}\n\n"
+        "Изменения применятся только после подтверждения."
+    )
+
+
+def format_nutrition_recalculation_applied(
+    result: NutritionRecalculation,
+) -> str:
+    """Confirm the newly saved calorie and macro targets."""
+    return (
+        "✅ Дневная норма пересчитана.\n"
+        f"🔥 {result.calories} ккал\n"
+        f"Б {result.protein} г · Ж {result.fat} г · У {result.carbs} г"
+    )
+
+
+def parse_weight_token(data: str | None) -> Decimal | None:
+    """Decode an exact hundredth-kilogram value from a callback."""
+    try:
+        token = int((data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        return None
+    if not 3000 <= token <= 35000:
+        return None
+    return Decimal(token) / Decimal(100)
