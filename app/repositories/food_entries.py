@@ -112,3 +112,27 @@ async def list_recent_food_entries(
         if len(recent) == limit:
             break
     return recent
+
+
+
+async def list_used_foods(
+    session: AsyncSession, *, user_id: int
+) -> list[Food]:
+    """Return unique active foods the user has actually added to the diary."""
+    result = await session.scalars(
+        select(Food)
+        .join(FoodEntry, FoodEntry.food_id == Food.id)
+        .where(
+            FoodEntry.user_id == user_id,
+            Food.is_archived.is_(False),
+        )
+        .order_by(FoodEntry.eaten_at.desc(), FoodEntry.id.desc())
+    )
+    unique: list[Food] = []
+    seen: set[int] = set()
+    for food in result:
+        if food.id in seen:
+            continue
+        seen.add(food.id)
+        unique.append(food)
+    return unique
