@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from aiogram.types import User as TelegramUser
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.keyboards.main_menu import main_menu
 from app.keyboards.water import (
     water_delete_confirmation,
     water_entry_actions,
@@ -29,6 +30,12 @@ from app.states.water import WaterAdd, WaterEdit
 
 router = Router()
 QUICK_AMOUNTS = {"+200 мл": 200, "+300 мл": 300, "+500 мл": 500}
+WATER_MENU_ACTIONS = {
+    *QUICK_AMOUNTS,
+    "Другой объем",
+    "Записи воды за сегодня",
+    "↩️ Главное меню",
+}
 
 
 @router.message(Command("water"))
@@ -47,7 +54,7 @@ async def open_water(
     await message.answer(
         f"{format_water_status(user, entries)}\n\n"
         "Введите объем воды от 1 до 10000 мл:",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=water_menu(),
     )
 
 
@@ -72,11 +79,18 @@ async def begin_custom_water(message: Message, state: FSMContext) -> None:
     """Ask for a custom water amount."""
     await state.set_state(WaterAdd.amount)
     await message.answer(
-        "Введите объем воды от 1 до 10000 мл:", reply_markup=ReplyKeyboardRemove()
+        "Введите объем воды от 1 до 10000 мл:", reply_markup=water_menu()
     )
 
 
-@router.message(WaterAdd.amount)
+@router.message(F.text == "↩️ Главное меню")
+async def return_from_water_to_main(message: Message, state: FSMContext) -> None:
+    """Leave water input without interpreting navigation as an amount."""
+    await state.clear()
+    await message.answer("Главное меню", reply_markup=main_menu())
+
+
+@router.message(WaterAdd.amount, ~F.text.in_(WATER_MENU_ACTIONS))
 async def save_custom_water(
     message: Message, state: FSMContext, session_factory: async_sessionmaker
 ) -> None:
