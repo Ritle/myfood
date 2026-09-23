@@ -47,6 +47,12 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         user_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
         }
+        combo_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(meal_combo_suggestions)"
+            ).fetchall()
+        }
         template_item_columns = {
             row[1]
             for row in connection.execute(
@@ -54,7 +60,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
             ).fetchall()
         }
 
-    assert revision == ("0018_weight_nutrition_recalc",)
+    assert revision == ("0019_meal_combo_suggestions",)
     assert {
         "users",
         "foods",
@@ -67,6 +73,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "meal_templates",
         "meal_template_items",
         "diary_days",
+        "meal_combo_suggestions",
     } <= tables
     assert {
         "movement_reminders_enabled",
@@ -78,6 +85,13 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
         "nutrition_target_weight_kg",
         "nutrition_recalc_prompt_weight_kg",
     } <= user_columns
+    assert {
+        "user_id",
+        "signature",
+        "meal_type",
+        "source_day",
+        "status",
+    } <= combo_columns
     assert {"catalog_section", "nutrition_basis"} <= food_columns
     assert {"is_full_serving", "snack_number"} <= food_entry_columns
     assert "is_full_serving" in template_item_columns
