@@ -12,7 +12,6 @@ from app.repositories.notifications import (
     try_create_notification,
 )
 from app.services.diary import add_diary_entry
-from app.services.water import add_water
 from app.services.notifications import (
     is_quiet_time,
     latest_movement_slot,
@@ -20,6 +19,7 @@ from app.services.notifications import (
     plan_user_notifications,
     run_notification_cycle,
 )
+from app.services.water import add_water
 
 
 class FakeBot:
