@@ -19,6 +19,7 @@ from app.services.notifications import (
     plan_user_notifications,
     run_notification_cycle,
 )
+from app.services.water import add_water
 
 
 class FakeBot:
@@ -478,5 +479,137 @@ async def test_explicit_meal_review_suppresses_pending_auto_review_and_claims_la
             f":breakfast:{int(latest_time.timestamp())}"
         )
         assert [log.status for log in logs] == ["suppressed", "sent"]
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_water_reminder_is_not_planned_with_recent_water_mark() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(
+                telegram_id=201,
+                first_name="User",
+                timezone="UTC",
+                daily_water_target_ml=2000,
+            )
+            settings = NotificationSettings(
+                meal_reminders_enabled=False,
+                water_reminders_enabled=True,
+                water_interval_minutes=60,
+                water_start_time=time(9),
+                water_end_time=time(21),
+                movement_reminders_enabled=False,
+                morning_report_enabled=False,
+                nutrition_monitoring_enabled=False,
+                quiet_start_time=time(22),
+                quiet_end_time=time(8),
+            )
+            session.add(user)
+            await session.flush()
+            settings.user_id = user.id
+            session.add(settings)
+            await session.commit()
+            await session.refresh(user)
+
+            await add_water(
+                session,
+                user_id=user.id,
+                amount_ml=250,
+                drunk_at=datetime(2026, 9, 23, 11, 1, tzinfo=UTC),
+            )
+            await plan_user_notifications(
+                session,
+                user=user,
+                settings=settings,
+                now=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+            )
+            logs = list(await session.scalars(select(NotificationLog)))
+
+        assert logs == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_pending_water_reminder_is_suppressed_after_new_water_mark() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = User(
+                telegram_id=202,
+                first_name="User",
+                timezone="UTC",
+                daily_water_target_ml=2000,
+            )
+            session.add(user)
+            await session.flush()
+            session.add(
+                NotificationSettings(
+                    user_id=user.id,
+                    meal_reminders_enabled=False,
+                    water_reminders_enabled=True,
+                    water_interval_minutes=60,
+                    water_start_time=time(9),
+                    water_end_time=time(21),
+                    movement_reminders_enabled=False,
+                    morning_report_enabled=False,
+                    nutrition_monitoring_enabled=False,
+                    quiet_start_time=time(22),
+                    quiet_end_time=time(8),
+                )
+            )
+            session.add(
+                DiaryDay(
+                    user_id=user.id,
+                    logical_date=date(2026, 9, 23),
+                    started_at=datetime(2026, 9, 23, 0, 0, tzinfo=UTC),
+                )
+            )
+            session.add(
+                NotificationLog(
+                    user_id=user.id,
+                    notification_type="water",
+                    local_date=date(2026, 9, 23),
+                    deduplication_key="water:202:2026-09-23:1200",
+                    status="pending",
+                    scheduled_for=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+            await session.refresh(user)
+            await add_water(
+                session,
+                user_id=user.id,
+                amount_ml=250,
+                drunk_at=datetime(2026, 9, 23, 11, 30, tzinfo=UTC),
+            )
+
+        bot = FakeBot()
+        await run_notification_cycle(
+            bot,
+            sessions,
+            now=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+        )
+
+        async with sessions() as session:
+            log = await session.scalar(
+                select(NotificationLog).where(
+                    NotificationLog.deduplication_key
+                    == "water:202:2026-09-23:1200"
+                )
+            )
+
+        assert bot.messages == []
+        assert log is not None
+        assert log.status == "suppressed"
     finally:
         await engine.dispose()

@@ -32,7 +32,11 @@ from app.services.nutrition_monitoring import (
     latest_meal_eaten_at,
 )
 from app.services.today import format_today
-from app.services.water import get_water_for_day, total_water
+from app.services.water import (
+    get_water_for_day,
+    total_water,
+    water_reminder_allowed,
+)
 
 logger = logging.getLogger(__name__)
 MEAL_TIMES = {
@@ -181,7 +185,17 @@ async def plan_user_notifications(
                 session, user_id=user.id, day=local_day, timezone_name=user.timezone
             )
             consumed = total_water(water_entries)
-            if user.daily_water_target_ml is None or consumed < user.daily_water_target_ml:
+            inactive_long_enough = water_reminder_allowed(
+                water_entries,
+                now=now,
+            )
+            if (
+                inactive_long_enough
+                and (
+                    user.daily_water_target_ml is None
+                    or consumed < user.daily_water_target_ml
+                )
+            ):
                 await try_create_notification(
                     session,
                     user_id=user.id,
@@ -271,7 +285,11 @@ async def deliver_scheduled_notification(
             await mark_notification_suppressed(session, log.id)
             return
     text, reply_markup = await build_notification(
-        session, log=log, user=user, settings=settings
+        session,
+        log=log,
+        user=user,
+        settings=settings,
+        now=now,
     )
     if text is None:
         await mark_notification_suppressed(session, log.id)
@@ -301,6 +319,7 @@ async def build_notification(
     log: NotificationLog,
     user: User,
     settings: NotificationSettings,
+    now: datetime,
 ):
     """Build a notification after checking goals and diary state."""
     if log.notification_type.startswith(("meal:", "meal_snooze:")):
@@ -372,6 +391,8 @@ async def build_notification(
             timezone_name=user.timezone,
         )
         consumed = total_water(entries)
+        if not water_reminder_allowed(entries, now=now):
+            return None, None
         if user.daily_water_target_ml is not None and consumed >= user.daily_water_target_ml:
             return None, None
         target = (
