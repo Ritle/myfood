@@ -11,6 +11,7 @@ from app.services.water import (
     parse_water_amount,
     remove_water,
     total_water,
+    water_reminder_allowed,
 )
 
 
@@ -84,3 +85,32 @@ async def test_water_crud_uses_local_day_and_checks_ownership() -> None:
             assert await remove_water(session, user_id=owner.id, entry_id=first.id)
     finally:
         await engine.dispose()
+
+
+
+def test_water_reminder_requires_full_hour_without_a_mark() -> None:
+    user_entry_time = datetime(2026, 9, 23, 11, 1, tzinfo=UTC)
+    recent = type(
+        "WaterMark",
+        (),
+        {"drunk_at": user_entry_time},
+    )()
+
+    assert not water_reminder_allowed(
+        [recent],
+        now=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+    )
+
+    hour_old = type(
+        "WaterMark",
+        (),
+        {"drunk_at": datetime(2026, 9, 23, 11, 0, tzinfo=UTC)},
+    )()
+    assert water_reminder_allowed(
+        [hour_old],
+        now=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+    )
+    assert water_reminder_allowed(
+        [],
+        now=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+    )
