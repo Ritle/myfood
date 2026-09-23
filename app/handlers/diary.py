@@ -24,6 +24,7 @@ from app.keyboards.diary import (
     diary_recent_food_results,
     diary_source_actions,
     finish_diary_adding_text,
+    frequent_combo_confirmation,
     meal_template_delete_confirmation,
 )
 from app.models import Food, FoodEntry, User
@@ -56,6 +57,12 @@ from app.services.foods import (
     recent_food_portions,
     search_foods,
     search_foods_page,
+)
+from app.services.meal_combo_suggestions import (
+    claim_frequent_meal_suggestion,
+    dismiss_frequent_combo_suggestion,
+    format_frequent_combo_prompt,
+    save_frequent_combo_as_template,
 )
 from app.services.meal_templates import (
     MAX_MEAL_TEMPLATE_ITEMS,
@@ -181,11 +188,9 @@ async def finish_diary_addition(
     meal_type = data.get("meal_type")
     snack_number = data.get("snack_number")
     analysis: str | None = None
+    combo_suggestion = None
 
-    if (
-        message.from_user is not None
-        and meal_type in FINISH_MEAL_TEXTS
-    ):
+    if message.from_user is not None and meal_type in MEAL_LABELS:
         async with session_factory() as session:
             user = await ensure_user(session, message.from_user)
             day = await get_or_create_active_diary_day(session, user=user)
@@ -195,21 +200,29 @@ async def finish_diary_addition(
                 day=day.logical_date,
                 timezone_name=user.timezone,
             )
-            latest = latest_meal_eaten_at(entries, meal_type)
-            if latest is not None:
-                analysis = format_meal_review(
-                    user,
-                    entries,
-                    meal_type=meal_type,
-                )
-                if analysis is not None:
-                    await record_nutrition_meal_review_sent(
-                        session,
-                        user_id=user.id,
-                        local_date=day.logical_date,
+            if meal_type in FINISH_MEAL_TEXTS:
+                latest = latest_meal_eaten_at(entries, meal_type)
+                if latest is not None:
+                    analysis = format_meal_review(
+                        user,
+                        entries,
                         meal_type=meal_type,
-                        latest_eaten_at=latest,
                     )
+                    if analysis is not None:
+                        await record_nutrition_meal_review_sent(
+                            session,
+                            user_id=user.id,
+                            local_date=day.logical_date,
+                            meal_type=meal_type,
+                            latest_eaten_at=latest,
+                        )
+            combo_suggestion = await claim_frequent_meal_suggestion(
+                session,
+                user=user,
+                source_day=day.logical_date,
+                meal_type=meal_type,
+                snack_number=snack_number,
+            )
 
     await state.clear()
     label = (
@@ -229,6 +242,74 @@ async def finish_diary_addition(
     if analysis is not None:
         text = f"{text}\n\n{analysis}"
     await message.answer(text, reply_markup=diary_menu())
+    if combo_suggestion is not None:
+        await message.answer(
+            format_frequent_combo_prompt(combo_suggestion),
+            reply_markup=frequent_combo_confirmation(
+                combo_suggestion.suggestion_id
+            ),
+        )
+
+
+@router.callback_query(F.data.startswith("diary:combo:save:"))
+async def save_frequent_combo(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Save a detected recurring combo as a normal reusable meal template."""
+    suggestion_id = parse_callback_id(callback.data)
+    if suggestion_id is None:
+        await callback.answer("Некорректное предложение", show_alert=True)
+        return
+    try:
+        async with session_factory() as session:
+            user = await ensure_user(session, callback.from_user)
+            template = await save_frequent_combo_as_template(
+                session,
+                user=user,
+                suggestion_id=suggestion_id,
+            )
+    except ValueError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        if template is None:
+            await callback.message.answer(
+                "Этот набор уже сохранён или предложение больше неактуально."
+            )
+        else:
+            await callback.message.answer(
+                f"✅ Шаблон «{template.name}» сохранён. "
+                "Теперь его можно выбрать в «Питание» → «Мои шаблоны»."
+            )
+    await callback.answer("Шаблон сохранён" if template is not None else "Готово")
+
+
+@router.callback_query(F.data.startswith("diary:combo:dismiss:"))
+async def dismiss_frequent_combo(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Permanently dismiss this recurring product combination."""
+    suggestion_id = parse_callback_id(callback.data)
+    if suggestion_id is None:
+        await callback.answer("Некорректное предложение", show_alert=True)
+        return
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        dismissed = await dismiss_frequent_combo_suggestion(
+            session,
+            user_id=user.id,
+            suggestion_id=suggestion_id,
+        )
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        if dismissed:
+            await callback.message.answer(
+                "Хорошо, этот набор больше предлагать не буду."
+            )
+    await callback.answer("Не буду предлагать" if dismissed else "Уже обработано")
 
 
 @router.message(DiaryAdd.query, F.text.func(is_diary_search_text))

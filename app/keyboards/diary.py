@@ -267,3 +267,22 @@ def delete_confirmation(entry_id: int) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+
+def frequent_combo_confirmation(suggestion_id: int) -> InlineKeyboardMarkup:
+    """Offer saving or permanently dismissing a detected recurring meal combo."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💾 Сохранить шаблон",
+                    callback_data=f"diary:combo:save:{suggestion_id}",
+                ),
+                InlineKeyboardButton(
+                    text="Не предлагать",
+                    callback_data=f"diary:combo:dismiss:{suggestion_id}",
+                ),
+            ]
+        ]
+    )

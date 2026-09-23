@@ -28,4 +28,4 @@ jobs:
       - name: Apply migrations to an empty database
         run: alembic upgrade head
       - name: Verify migration head
-        run: test "$(alembic current 2>/dev/null)" = "0018_weight_nutrition_recalc (head)"
+        run: test "$(alembic current 2>/dev/null)" = "0019_meal_combo_suggestions (head)"

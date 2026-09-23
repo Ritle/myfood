@@ -40,3 +40,20 @@ async def get_latest_closed_diary_day(
         .order_by(DiaryDay.ended_at.desc(), DiaryDay.id.desc())
         .limit(1)
     )
+
+
+
+async def list_recent_diary_days(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = 30,
+) -> list[DiaryDay]:
+    """Return recent logical diary days, newest first."""
+    result = await session.scalars(
+        select(DiaryDay)
+        .where(DiaryDay.user_id == user_id)
+        .order_by(DiaryDay.logical_date.desc(), DiaryDay.id.desc())
+        .limit(limit)
+    )
+    return list(result)
