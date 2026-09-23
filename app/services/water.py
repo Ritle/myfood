@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.services.days import resolve_diary_day_bounds
 
 MIN_WATER_ML = 1
 MAX_WATER_ML = 10000
+WATER_REMINDER_INACTIVITY = timedelta(hours=1)
 
 
 def parse_water_amount(value: str | None) -> int | None:
@@ -101,3 +102,32 @@ async def remove_water(session: AsyncSession, *, user_id: int, entry_id: int) ->
         return False
     await delete_water_entry(session, entry)
     return True
+
+
+
+def latest_water_time(entries: list[WaterEntry]) -> datetime | None:
+    """Return the latest recorded drinking time normalized to UTC."""
+    values: list[datetime] = []
+    for entry in entries:
+        value = entry.drunk_at
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        else:
+            value = value.astimezone(UTC)
+        values.append(value)
+    return max(values, default=None)
+
+
+def water_reminder_allowed(
+    entries: list[WaterEntry],
+    *,
+    now: datetime,
+    inactivity: timedelta = WATER_REMINDER_INACTIVITY,
+) -> bool:
+    """Allow a reminder only after the configured time without a water mark."""
+    latest = latest_water_time(entries)
+    if latest is None:
+        return True
+    current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    current = current.astimezone(UTC)
+    return current - latest >= inactivity
