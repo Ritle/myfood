@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -126,7 +127,7 @@ async def claim_frequent_meal_suggestion(
     session: AsyncSession,
     *,
     user: User,
-    source_day,
+    source_day: date,
     meal_type: str,
     snack_number: int | None,
 ) -> FrequentMealSuggestion | None:
@@ -204,9 +205,6 @@ async def claim_frequent_meal_suggestion(
             if profile and profiles_are_similar(current, profile):
                 occurrence_count += 1
                 break
-        if occurrence_count >= FREQUENT_COMBO_MIN_OCCURRENCES:
-            break
-
     if occurrence_count < FREQUENT_COMBO_MIN_OCCURRENCES:
         return None
 
