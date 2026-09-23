@@ -3,6 +3,7 @@ from app.models.diary_day import DiaryDay
 from app.models.favorite_food import FavoriteFood
 from app.models.food import Food
 from app.models.food_entry import FoodEntry
+from app.models.meal_combo_suggestion import MealComboSuggestion
 from app.models.meal_template import MealTemplate, MealTemplateItem
 from app.models.notification_log import NotificationLog
 from app.models.notification_settings import NotificationSettings
@@ -16,6 +17,7 @@ __all__ = [
     "FavoriteFood",
     "Food",
     "FoodEntry",
+    "MealComboSuggestion",
     "MealTemplate",
     "MealTemplateItem",
     "NotificationLog",
