@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+from statistics import median
 from typing import Literal
 
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.repositories.favorite_foods import (
 )
 from app.repositories.food_entries import (
     get_latest_food_entry,
+    list_food_portion_history,
     list_recent_food_entries,
     list_recent_foods,
     list_used_foods,
@@ -50,6 +52,13 @@ class RecentFoodPortion:
 
 FoodEditableField = Literal["name", "brand", "calories", "protein", "fat", "carbs"]
 CatalogSection = Literal["food", "dish"]
+
+HABITUAL_PORTION_HISTORY_LIMIT = 12
+HABITUAL_PORTION_MIN_SAMPLES = 3
+HABITUAL_PORTION_MIN_SHARE = Decimal("0.60")
+HABITUAL_PORTION_ABSOLUTE_TOLERANCE_G = Decimal(25)
+HABITUAL_PORTION_RELATIVE_TOLERANCE = Decimal("0.20")
+HABITUAL_PORTION_ROUND_STEP_G = Decimal(5)
 
 
 def normalize_food_text(value: str) -> str:
@@ -289,6 +298,46 @@ async def recent_food_portions(
         )
         for entry in entries
     ]
+
+
+async def habitual_food_portion(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    food_id: int,
+) -> Decimal | None:
+    """Infer a stable typical portion from the user's recent weighed history."""
+    entries = await list_food_portion_history(
+        session,
+        user_id=user_id,
+        food_id=food_id,
+        limit=HABITUAL_PORTION_HISTORY_LIMIT,
+    )
+    weights = [Decimal(entry.weight_grams) for entry in entries]
+    if len(weights) < HABITUAL_PORTION_MIN_SAMPLES:
+        return None
+
+    center = Decimal(median(weights))
+    tolerance = max(
+        HABITUAL_PORTION_ABSOLUTE_TOLERANCE_G,
+        center * HABITUAL_PORTION_RELATIVE_TOLERANCE,
+    )
+    clustered = [
+        weight for weight in weights if abs(weight - center) <= tolerance
+    ]
+    if (
+        len(clustered) < HABITUAL_PORTION_MIN_SAMPLES
+        or Decimal(len(clustered)) / Decimal(len(weights))
+        < HABITUAL_PORTION_MIN_SHARE
+    ):
+        return None
+
+    typical = Decimal(median(clustered))
+    return (
+        (typical / HABITUAL_PORTION_ROUND_STEP_G)
+        .quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        * HABITUAL_PORTION_ROUND_STEP_G
+    )
 
 
 async def latest_food_portion_entry(
