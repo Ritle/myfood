@@ -63,6 +63,11 @@ def build_nutrition_recalculation(
         weight_kg=Decimal(weight_kg),
         activity_level=user.activity_level,
         goal=user.goal,
+        weekly_weight_change_kg=(
+            Decimal(user.target_weight_change_kg_per_week)
+            if user.target_weight_change_kg_per_week is not None
+            else None
+        ),
         today=today or datetime.now(UTC).date(),
     )
     protein, fat, carbs = calculate_daily_macronutrient_targets(
