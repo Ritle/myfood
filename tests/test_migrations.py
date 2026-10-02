@@ -60,7 +60,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
             ).fetchall()
         }
 
-    assert revision == ("0019_meal_combo_suggestions",)
+    assert revision == ("0020_weight_change_pace",)
     assert {
         "users",
         "foods",
@@ -84,6 +84,7 @@ def test_all_migrations_apply_to_empty_database(tmp_path: Path) -> None:
     assert {
         "nutrition_target_weight_kg",
         "nutrition_recalc_prompt_weight_kg",
+        "target_weight_change_kg_per_week",
     } <= user_columns
     assert {
         "user_id",

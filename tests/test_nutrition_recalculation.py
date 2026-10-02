@@ -24,6 +24,7 @@ def configured_user(*, weight: Decimal = Decimal(90)) -> User:
         target_weight_kg=Decimal(80),
         activity_level="moderate",
         goal="lose",
+        target_weight_change_kg_per_week=Decimal("-0.50"),
         daily_calorie_target=2200,
         daily_protein_target_g=Decimal(144),
         daily_fat_target_g=Decimal(72),
@@ -47,6 +48,16 @@ def test_recalculation_becomes_due_after_three_kg() -> None:
     assert preview is not None
     assert preview.weight_kg == Decimal(87)
     assert preview.calories != user.daily_calorie_target
+
+    slower = configured_user()
+    slower.target_weight_change_kg_per_week = Decimal("-0.25")
+    slower_preview = build_nutrition_recalculation(
+        slower,
+        Decimal(87),
+        today=date(2026, 9, 22),
+    )
+    assert slower_preview is not None
+    assert slower_preview.calories > preview.calories
 
 
 @pytest.mark.asyncio

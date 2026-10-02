@@ -99,3 +99,77 @@ def test_calculator_rejects_minors() -> None:
             goal="maintain",
             today=date(2026, 1, 1),
         )
+
+
+
+def test_calorie_target_uses_selected_weekly_weight_loss_pace() -> None:
+    assert calculate_daily_calorie_target(
+        gender="female",
+        birth_date=date(1996, 1, 1),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
+        activity_level="moderate",
+        goal="lose",
+        weekly_weight_change_kg=Decimal("-0.25"),
+        today=date(2026, 1, 1),
+    ) == 2227
+    assert calculate_daily_calorie_target(
+        gender="female",
+        birth_date=date(1996, 1, 1),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
+        activity_level="moderate",
+        goal="lose",
+        weekly_weight_change_kg=Decimal("-0.50"),
+        today=date(2026, 1, 1),
+    ) == 1952
+    assert calculate_daily_calorie_target(
+        gender="female",
+        birth_date=date(1996, 1, 1),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
+        activity_level="moderate",
+        goal="lose",
+        weekly_weight_change_kg=Decimal("-0.75"),
+        today=date(2026, 1, 1),
+    ) == 1677
+
+
+def test_calorie_target_uses_selected_weekly_weight_gain_pace() -> None:
+    assert calculate_daily_calorie_target(
+        gender="female",
+        birth_date=date(1996, 1, 1),
+        height_cm=Decimal(180),
+        weight_kg=Decimal(80),
+        activity_level="moderate",
+        goal="gain",
+        weekly_weight_change_kg=Decimal("0.25"),
+        today=date(2026, 1, 1),
+    ) == 2777
+
+
+@pytest.mark.parametrize(
+    ("goal", "pace"),
+    [
+        ("lose", Decimal("0.25")),
+        ("lose", Decimal("-1.0")),
+        ("maintain", Decimal("0.25")),
+        ("gain", Decimal("-0.25")),
+        ("gain", Decimal("0.75")),
+    ],
+)
+def test_calorie_target_rejects_pace_that_does_not_match_goal(
+    goal: str,
+    pace: Decimal,
+) -> None:
+    with pytest.raises(ValueError, match="pace"):
+        calculate_daily_calorie_target(
+            gender="female",
+            birth_date=date(1996, 1, 1),
+            height_cm=Decimal(180),
+            weight_kg=Decimal(80),
+            activity_level="moderate",
+            goal=goal,
+            weekly_weight_change_kg=pace,
+            today=date(2026, 1, 1),
+        )

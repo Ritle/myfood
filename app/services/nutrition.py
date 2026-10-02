@@ -13,6 +13,9 @@ GOAL_FACTORS: dict[str, Decimal] = {
     "maintain": Decimal(1),
     "gain": Decimal("1.10"),
 }
+KG_ENERGY_KCAL = Decimal(7700)
+MAX_WEEKLY_LOSS_KG = Decimal("0.75")
+MAX_WEEKLY_GAIN_KG = Decimal("0.50")
 PROTEIN_PER_KG: dict[str, Decimal] = {
     "lose": Decimal("1.6"),
     "maintain": Decimal("1.4"),
@@ -49,6 +52,7 @@ def calculate_daily_calorie_target(
     weight_kg: Decimal,
     activity_level: str,
     goal: str,
+    weekly_weight_change_kg: Decimal | None = None,
     today: date | None = None,
 ) -> int:
     """Calculate a suggested daily calorie target using Mifflin–St Jeor."""
@@ -66,7 +70,16 @@ def calculate_daily_calorie_target(
 
     constant = Decimal(5) if gender == "male" else Decimal(-161)
     bmr = Decimal(10) * weight_kg + Decimal("6.25") * height_cm - Decimal(5) * age + constant
-    target = bmr * ACTIVITY_FACTORS[activity_level] * GOAL_FACTORS[goal]
+    tdee = bmr * ACTIVITY_FACTORS[activity_level]
+    if weekly_weight_change_kg is None:
+        target = tdee * GOAL_FACTORS[goal]
+    else:
+        pace = Decimal(weekly_weight_change_kg)
+        validate_weight_change_pace(goal, pace)
+        daily_energy_adjustment = pace * KG_ENERGY_KCAL / Decimal(7)
+        target = tdee + daily_energy_adjustment
+    if target <= 0:
+        raise ValueError("calculated calorie target must be positive")
     return int(target.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
@@ -132,3 +145,21 @@ def calculate_daily_macronutrient_targets(
 def clamp(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
     """Clamp a decimal value to an inclusive range."""
     return min(max(value, minimum), maximum)
+
+
+
+def validate_weight_change_pace(goal: str, pace: Decimal) -> None:
+    """Validate that a weekly weight-change pace matches the selected goal."""
+    if goal == "maintain":
+        if pace != 0:
+            raise ValueError("maintenance pace must be zero")
+        return
+    if goal == "lose":
+        if not -MAX_WEEKLY_LOSS_KG <= pace < 0:
+            raise ValueError("weight-loss pace must be between -0.75 and 0 kg/week")
+        return
+    if goal == "gain":
+        if not Decimal(0) < pace <= MAX_WEEKLY_GAIN_KG:
+            raise ValueError("weight-gain pace must be between 0 and 0.50 kg/week")
+        return
+    raise ValueError("unknown goal")

@@ -5,7 +5,9 @@ import pytest
 
 from app.handlers.profile import (
     KEEP_CALCULATED,
+    choose_goal,
     choose_nutrition_targets,
+    choose_weight_change_pace,
     enter_calories,
     enter_protein,
 )
@@ -119,3 +121,66 @@ async def test_profile_can_keep_calories_then_adjust_macros() -> None:
     assert state.data["daily_calorie_target"] == 2000
     assert state.current_state == ProfileSetup.protein
     assert "112 г" in message.answers[0][0]
+
+
+
+@pytest.mark.asyncio
+async def test_weight_loss_goal_asks_for_weekly_pace_before_calculating() -> None:
+    state = FakeState(
+        {
+            "gender": "female",
+            "birth_date": "1996-01-01",
+            "height_cm": Decimal(180),
+            "current_weight_kg": Decimal(80),
+            "activity_level": "moderate",
+        }
+    )
+    message = FakeMessage("Похудение")
+
+    await choose_goal(message, state)
+
+    assert state.current_state == ProfileSetup.weight_change_pace
+    assert state.data["goal"] == "lose"
+    assert "темп изменения веса" in message.answers[0][0]
+
+
+@pytest.mark.asyncio
+async def test_selected_weight_loss_pace_is_used_for_calculation() -> None:
+    state = FakeState(
+        {
+            "gender": "female",
+            "birth_date": "1996-01-01",
+            "height_cm": Decimal(180),
+            "current_weight_kg": Decimal(80),
+            "activity_level": "moderate",
+            "goal": "lose",
+        }
+    )
+    message = FakeMessage("Умеренно · −0,5 кг/нед")
+
+    await choose_weight_change_pace(message, state)
+
+    assert state.current_state == ProfileSetup.nutrition_choice
+    assert state.data["target_weight_change_kg_per_week"] == Decimal("-0.50")
+    assert state.data["suggested_calories"] > 0
+    assert "−0.5 кг/нед" in message.answers[0][0]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_sets_zero_pace_without_extra_question() -> None:
+    state = FakeState(
+        {
+            "gender": "female",
+            "birth_date": "1996-01-01",
+            "height_cm": Decimal(180),
+            "current_weight_kg": Decimal(80),
+            "activity_level": "moderate",
+        }
+    )
+    message = FakeMessage("Поддержание веса")
+
+    await choose_goal(message, state)
+
+    assert state.current_state == ProfileSetup.nutrition_choice
+    assert state.data["target_weight_change_kg_per_week"] == Decimal(0)
+    assert "поддержание" in message.answers[0][0]
