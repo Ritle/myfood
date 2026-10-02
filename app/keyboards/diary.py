@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -57,13 +59,35 @@ def diary_menu(
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def diary_portion_keyboard(meal_type: str | None = None) -> ReplyKeyboardMarkup:
-    """Offer common approximate portions while keeping free-form gram input."""
+def diary_portion_keyboard(
+    meal_type: str | None = None,
+    *,
+    habitual_portion: Decimal | None = None,
+) -> ReplyKeyboardMarkup:
+    """Offer a habitual portion first, then common approximate portions."""
     labels = [label for label, _ in QUICK_PORTIONS]
-    rows = [
-        [KeyboardButton(text=labels[index]), KeyboardButton(text=labels[index + 1])]
-        for index in range(0, len(labels) - 1, 2)
-    ]
+    if habitual_portion is not None:
+        exact_label = f"{format_decimal(habitual_portion)} г"
+        labels = [label for label in labels if label != exact_label]
+
+    rows: list[list[KeyboardButton]] = []
+    if habitual_portion is not None:
+        rows.append(
+            [
+                KeyboardButton(
+                    text=f"⭐ {format_decimal(habitual_portion)} г"
+                )
+            ]
+        )
+    rows.extend(
+        [
+            [
+                KeyboardButton(text=labels[index]),
+                KeyboardButton(text=labels[index + 1]),
+            ]
+            for index in range(0, len(labels) - 1, 2)
+        ]
+    )
     if len(labels) % 2:
         rows.append([KeyboardButton(text=labels[-1])])
     rows.append([KeyboardButton(text=finish_diary_adding_text(meal_type))])

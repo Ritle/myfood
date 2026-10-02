@@ -51,6 +51,7 @@ from app.services.diary import (
 )
 from app.services.foods import (
     favorite_foods,
+    habitual_food_portion,
     latest_food_portion_entry,
     load_food,
     normalize_food_text,
@@ -959,6 +960,15 @@ async def select_diary_food(
             entry = None
             entries = []
             alert = None
+        habitual_portion = (
+            await habitual_food_portion(
+                session,
+                user_id=user.id,
+                food_id=food.id,
+            )
+            if food is not None and food.nutrition_basis != "portion"
+            else None
+        )
     if food is None or meal_type not in MEAL_LABELS:
         await callback.answer("Продукт недоступен", show_alert=True)
         return
@@ -986,10 +996,19 @@ async def select_diary_food(
         snack_number=snack_number,
     )
     if callback.message is not None:
+        habitual_text = (
+            f"\n⭐ Ваша привычная порция: {format_decimal(habitual_portion)} г."
+            if habitual_portion is not None
+            else ""
+        )
         await callback.message.answer(
-            f"Выберите порцию для «{food.name}» или введите точный вес в граммах.\n"
+            f"Выберите порцию для «{food.name}» или введите точный вес в граммах."
+            f"{habitual_text}\n"
             "Меры приблизительные: вес зависит от продукта.",
-            reply_markup=diary_portion_keyboard(meal_type),
+            reply_markup=diary_portion_keyboard(
+                meal_type,
+                habitual_portion=habitual_portion,
+            ),
         )
     await callback.answer()
 
