@@ -9,6 +9,7 @@ class ProfileSetup(StatesGroup):
     target_weight = State()
     activity = State()
     goal = State()
+    weight_change_pace = State()
     nutrition_choice = State()
     manual_calories = State()
     protein = State()
