@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry, User
-from app.services.diary import MEAL_LABELS, suggest_meal_type, summarize_entries
+from app.services.diary import suggest_meal_type, summarize_entries
 from app.services.foods import meal_food_usage_counts, used_foods
 from app.utils.formatting import format_decimal
 
@@ -16,6 +16,12 @@ LATE_CARB_ENERGY_SHARE = Decimal("0.55")
 MEAL_CONTEXT_MIN_OCCURRENCES = 2
 MEAL_CONTEXT_MAX_OCCURRENCES = 5
 MEAL_CONTEXT_MAX_BONUS = Decimal("1.5")
+MEAL_CONTEXT_LABELS = {
+    "breakfast": "завтрака",
+    "lunch": "обеда",
+    "dinner": "ужина",
+    "snack": "перекуса",
+}
 
 
 class FoodRecommendation:
@@ -337,7 +343,7 @@ def format_food_recommendations(
     ):
         lines.append(
             f"🧠 Учитываю ваши привычные продукты для "
-            f"{MEAL_LABELS[meal_context].split(' ', 1)[1].lower()}."
+            f"{MEAL_CONTEXT_LABELS[meal_context]}."
         )
     if late:
         lines.append(
