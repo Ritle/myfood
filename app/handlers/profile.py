@@ -29,7 +29,21 @@ ACTIVITY_LABELS = {
     "Высокая": "high",
     "Очень высокая": "very_high",
 }
-GOAL_LABELS = {"Похудение": "lose", "Поддержание веса": "maintain", "Набор веса": "gain"}
+GOAL_LABELS = {
+    "Похудение": "lose",
+    "Поддержание веса": "maintain",
+    "Набор веса": "gain",
+}
+LOSS_PACE_LABELS = {
+    "Медленно · −0,25 кг/нед": Decimal("-0.25"),
+    "Умеренно · −0,5 кг/нед": Decimal("-0.50"),
+    "Быстрее · −0,75 кг/нед": Decimal("-0.75"),
+}
+GAIN_PACE_LABELS = {
+    "Медленно · +0,1 кг/нед": Decimal("0.10"),
+    "Умеренно · +0,25 кг/нед": Decimal("0.25"),
+    "Быстрее · +0,5 кг/нед": Decimal("0.50"),
+}
 KEEP_CALCULATED = "Оставить расчет"
 
 MACRO_STEPS = {
@@ -83,6 +97,7 @@ async def profile_command(
         f"Рост: {user.height_cm} см\n"
         f"Текущий вес: {user.current_weight_kg} кг\n"
         f"Целевой вес: {user.target_weight_kg} кг\n"
+        f"Темп: {format_weight_change_pace(user.target_weight_change_kg_per_week)}\n"
         f"Цель: {user.daily_calorie_target} ккал/день\n"
         f"БЖУ: {format_target(user.daily_protein_target_g)} / "
         f"{format_target(user.daily_fat_target_g)} / "
@@ -185,6 +200,36 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
     if value is None:
         await message.answer("Выберите цель кнопкой.")
         return
+    await state.update_data(goal=value)
+    if value == "maintain":
+        await state.update_data(target_weight_change_kg_per_week=Decimal(0))
+        await show_calculated_nutrition(message, state)
+        return
+
+    pace_labels = LOSS_PACE_LABELS if value == "lose" else GAIN_PACE_LABELS
+    await state.set_state(ProfileSetup.weight_change_pace)
+    await message.answer(
+        "Выберите желаемый темп изменения веса. "
+        "Он будет использоваться для расчёта дефицита или профицита калорий:",
+        reply_markup=choices(*pace_labels),
+    )
+
+
+@router.message(ProfileSetup.weight_change_pace)
+async def choose_weight_change_pace(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    goal = data.get("goal")
+    pace_labels = LOSS_PACE_LABELS if goal == "lose" else GAIN_PACE_LABELS
+    pace = pace_labels.get(message.text or "")
+    if pace is None:
+        await message.answer("Выберите темп кнопкой.")
+        return
+    await state.update_data(target_weight_change_kg_per_week=pace)
+    await show_calculated_nutrition(message, state)
+
+
+async def show_calculated_nutrition(message: Message, state: FSMContext) -> None:
+    """Calculate calorie and macro suggestions from the selected weekly pace."""
     data = await state.get_data()
     target = calculate_daily_calorie_target(
         gender=data["gender"],
@@ -192,16 +237,18 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
         height_cm=data["height_cm"],
         weight_kg=data["current_weight_kg"],
         activity_level=data["activity_level"],
-        goal=value,
+        goal=data["goal"],
+        weekly_weight_change_kg=Decimal(
+            data["target_weight_change_kg_per_week"]
+        ),
     )
     protein, fat, carbs = calculate_daily_macronutrient_targets(
         target,
         weight_kg=data["current_weight_kg"],
         activity_level=data["activity_level"],
-        goal=value,
+        goal=data["goal"],
     )
     await state.update_data(
-        goal=value,
         suggested_calories=target,
         suggested_daily_protein_target_g=protein,
         suggested_daily_fat_target_g=fat,
@@ -210,11 +257,12 @@ async def choose_goal(message: Message, state: FSMContext) -> None:
     await state.set_state(ProfileSetup.nutrition_choice)
     await message.answer(
         f"Расчетные нормы на день:\n"
+        f"Темп: {format_weight_change_pace(Decimal(data['target_weight_change_kg_per_week']))}\n"
         f"Калории: {target} ккал\n"
         f"Белки: {protein} г\n"
         f"Жиры: {fat} г\n"
         f"Углеводы: {carbs} г\n\n"
-        "Можно оставить расчет или скорректировать значения. "
+        "Калории рассчитаны из вашей поддержки веса и выбранного темпа. "
         "Белок и жир рассчитываются от массы тела с учетом цели и активности, "
         "углеводы — из оставшейся калорийности. Значения служат ориентиром.",
         reply_markup=choices(KEEP_CALCULATED, "Скорректировать"),
@@ -366,6 +414,7 @@ async def enter_water(
             "target_weight_kg",
             "activity_level",
             "goal",
+            "target_weight_change_kg_per_week",
             "daily_calorie_target",
             "daily_protein_target_g",
             "daily_fat_target_g",
@@ -382,6 +431,17 @@ async def enter_water(
         "Расчетные нормы БЖУ сохранены; цель воды — только если вы ее указали.",
         reply_markup=main_menu(),
     )
+
+
+def format_weight_change_pace(value: Decimal | None) -> str:
+    """Format signed weekly weight-change pace for the profile."""
+    if value is None:
+        return "—"
+    pace = Decimal(value)
+    if pace == 0:
+        return "поддержание"
+    sign = "+" if pace > 0 else "−"
+    return f"{sign}{abs(pace).normalize()} кг/нед"
 
 
 def format_target(value: Decimal | int | None) -> str:
