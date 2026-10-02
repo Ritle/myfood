@@ -5,9 +5,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.keyboards.today import report_macro_details
 from app.models import Base, Food, FoodEntry, NotificationLog, User
 from app.services.calorie_alerts import claim_calorie_alert, crossed_calorie_levels
-from app.keyboards.today import report_macro_details
 from app.services.today import format_macro_sources, format_today, macro_sources, progress_bar
 
 
