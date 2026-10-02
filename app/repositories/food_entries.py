@@ -136,3 +136,25 @@ async def list_used_foods(
         seen.add(food.id)
         unique.append(food)
     return unique
+
+
+
+async def list_food_portion_history(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    food_id: int,
+    limit: int = 12,
+) -> list[FoodEntry]:
+    """Return a user's recent weighed portions for one product."""
+    result = await session.scalars(
+        select(FoodEntry)
+        .where(
+            FoodEntry.user_id == user_id,
+            FoodEntry.food_id == food_id,
+            FoodEntry.is_full_serving.is_(False),
+        )
+        .order_by(FoodEntry.eaten_at.desc(), FoodEntry.id.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    return list(result)
