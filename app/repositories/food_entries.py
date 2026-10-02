@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry
@@ -158,3 +158,22 @@ async def list_food_portion_history(
         .limit(max(1, min(limit, 100)))
     )
     return list(result)
+
+
+
+async def food_meal_usage_counts(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    meal_type: str,
+) -> dict[int, int]:
+    """Return how often each food was logged in one meal type."""
+    rows = await session.execute(
+        select(FoodEntry.food_id, func.count(FoodEntry.id))
+        .where(
+            FoodEntry.user_id == user_id,
+            FoodEntry.meal_type == meal_type,
+        )
+        .group_by(FoodEntry.food_id)
+    )
+    return {food_id: int(count) for food_id, count in rows.all()}

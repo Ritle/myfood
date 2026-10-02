@@ -5,14 +5,23 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry, User
-from app.services.diary import summarize_entries
-from app.services.foods import used_foods
+from app.services.diary import suggest_meal_type, summarize_entries
+from app.services.foods import meal_food_usage_counts, used_foods
 from app.utils.formatting import format_decimal
 
 LATE_FOOD_START = time(22)
 LATE_FOOD_END = time(5)
 LATE_CARB_MIN_GRAMS = Decimal(20)
 LATE_CARB_ENERGY_SHARE = Decimal("0.55")
+MEAL_CONTEXT_MIN_OCCURRENCES = 2
+MEAL_CONTEXT_MAX_OCCURRENCES = 5
+MEAL_CONTEXT_MAX_BONUS = Decimal("1.5")
+MEAL_CONTEXT_LABELS = {
+    "breakfast": "завтрака",
+    "lunch": "обеда",
+    "dinner": "ужина",
+    "snack": "перекуса",
+}
 
 
 class FoodRecommendation:
@@ -28,6 +37,7 @@ class FoodRecommendation:
         fat: Decimal,
         carbs: Decimal,
         score: Decimal,
+        context_hits: int = 0,
     ) -> None:
         self.food = food
         self.amount_label = amount_label
@@ -36,6 +46,7 @@ class FoodRecommendation:
         self.fat = fat
         self.carbs = carbs
         self.score = score
+        self.context_hits = context_hits
 
 
 def remaining_targets(user: User, entries: list[FoodEntry]) -> dict[str, Decimal]:
@@ -191,6 +202,7 @@ async def recommend_foods_for_today(
     current = now or datetime.now(UTC)
     local_time = current.astimezone(ZoneInfo(user.timezone)).time()
     late = is_late_food_window(local_time)
+    meal_context = suggest_meal_type(user.timezone, now=current)
     dominant = dominant_deficit(
         user,
         entries,
@@ -200,9 +212,19 @@ async def recommend_foods_for_today(
         return []
 
     candidates = await used_foods(session, user_id=user.id)
+    meal_counts = await meal_food_usage_counts(
+        session,
+        user_id=user.id,
+        meal_type=meal_context,
+    )
 
     ranked = [
-        recommendation_for_food(food, remaining=remaining, dominant=dominant)
+        recommendation_for_food(
+            food,
+            remaining=remaining,
+            dominant=dominant,
+            context_hits=meal_counts.get(food.id, 0),
+        )
         for food in candidates
     ]
     ranked = [item for item in ranked if item is not None]
@@ -219,6 +241,7 @@ def recommendation_for_food(
     *,
     remaining: dict[str, Decimal],
     dominant: str | None,
+    context_hits: int = 0,
 ) -> FoodRecommendation | None:
     """Score one product and choose a practical serving for the current deficit."""
     nutrients = {
@@ -279,6 +302,8 @@ def recommendation_for_food(
                 * Decimal("1.5")
             )
 
+    score += meal_context_bonus(context_hits)
+
     return FoodRecommendation(
         food=food,
         amount_label=amount_label,
@@ -287,6 +312,7 @@ def recommendation_for_food(
         fat=portion["fat"],
         carbs=portion["carbs"],
         score=score,
+        context_hits=context_hits,
     )
 
 
@@ -309,7 +335,16 @@ def format_food_recommendations(
     )
     remaining = remaining_targets(user, entries)
     labels = {"protein": "белок", "fat": "жиры", "carbs": "углеводы"}
+    meal_context = suggest_meal_type(user.timezone, now=current)
     lines = ["🍽 Что можно съесть сегодня"]
+    if any(
+        item.context_hits >= MEAL_CONTEXT_MIN_OCCURRENCES
+        for item in recommendations
+    ):
+        lines.append(
+            f"🧠 Учитываю ваши привычные продукты для "
+            f"{MEAL_CONTEXT_LABELS[meal_context]}."
+        )
     if late:
         lines.append(
             "🌙 После 22:00 исключаю слишком углеводные варианты."
@@ -363,3 +398,16 @@ def is_too_carb_heavy_for_late_time(item: FoodRecommendation) -> bool:
         return False
     carb_energy_share = item.carbs * Decimal(4) / item.calories
     return carb_energy_share >= LATE_CARB_ENERGY_SHARE
+
+
+
+def meal_context_bonus(context_hits: int) -> Decimal:
+    """Give a bounded preference to foods repeatedly used in the current meal."""
+    if context_hits < MEAL_CONTEXT_MIN_OCCURRENCES:
+        return Decimal(0)
+    normalized = min(context_hits, MEAL_CONTEXT_MAX_OCCURRENCES)
+    return (
+        Decimal(normalized)
+        / Decimal(MEAL_CONTEXT_MAX_OCCURRENCES)
+        * MEAL_CONTEXT_MAX_BONUS
+    )
