@@ -17,6 +17,25 @@ class DailyView:
     snack_calories: dict[int, Decimal]
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class MacroSource:
+    """One food's contribution to a selected macro across the logical day."""
+
+    food_name: str
+    amount: Decimal
+    meal_labels: tuple[str, ...]
+
+
+MACRO_FIELDS = {
+    "protein": ("🥩 Белки", "protein"),
+    "fat": ("🥑 Жиры", "fat"),
+    "carbs": ("🍞 Углеводы", "carbs"),
+}
+MAX_MACRO_SOURCES = 20
+
+
 def build_daily_view(entries: list[FoodEntry]) -> DailyView:
     """Aggregate total nutrients and calories by meal."""
     meal_entries: dict[str, list[FoodEntry]] = defaultdict(list)
@@ -113,3 +132,109 @@ def format_water(actual_ml: int, target_ml: int | None) -> str:
     """Format water intake with an optional target."""
     target_text = str(target_ml) if target_ml is not None else "—"
     return f"💧 Вода: {actual_ml} / {target_text} мл"
+
+
+
+def macro_sources(
+    entries: list[FoodEntry],
+    *,
+    macro: str,
+) -> list[MacroSource]:
+    """Aggregate one macro by food and retain the meals where it came from."""
+    if macro not in MACRO_FIELDS:
+        raise ValueError("unknown macro")
+
+    _, field = MACRO_FIELDS[macro]
+    grouped: dict[int, tuple[str, Decimal, list[str]]] = {}
+    for entry in entries:
+        amount = Decimal(getattr(entry, field))
+        if amount <= 0:
+            continue
+        label = meal_label(entry.meal_type, entry.snack_number)
+        existing = grouped.get(entry.food_id)
+        if existing is None:
+            grouped[entry.food_id] = (entry.food.name, amount, [label])
+        else:
+            name, total, meals = existing
+            if label not in meals:
+                meals.append(label)
+            grouped[entry.food_id] = (name, total + amount, meals)
+
+    sources = [
+        MacroSource(
+            food_name=name,
+            amount=amount,
+            meal_labels=tuple(meals),
+        )
+        for name, amount, meals in grouped.values()
+    ]
+    return sorted(
+        sources,
+        key=lambda source: (-source.amount, source.food_name.casefold()),
+    )
+
+
+def format_macro_sources(
+    entries: list[FoodEntry],
+    *,
+    macro: str,
+    target: Decimal | None = None,
+    day_label: str | None = None,
+) -> str:
+    """Explain which foods contributed to a day's protein, fat, or carbs."""
+    if macro not in MACRO_FIELDS:
+        raise ValueError("unknown macro")
+    label, _ = MACRO_FIELDS[macro]
+    sources = macro_sources(entries, macro=macro)
+    total = sum((source.amount for source in sources), Decimal(0))
+
+    title = f"{label} — источники"
+    if day_label:
+        title += f" · {day_label}"
+    lines = [title, ""]
+    if target is not None:
+        lines.append(
+            f"Всего: {format_decimal(total)} / {format_decimal(target)} г"
+        )
+    else:
+        lines.append(f"Всего: {format_decimal(total)} г")
+
+    if total <= 0:
+        lines.extend(["", "За этот день источников пока нет."])
+        return "\n".join(lines)
+
+    lines.append("")
+    visible = sources[:MAX_MACRO_SOURCES]
+    for index, source in enumerate(visible, start=1):
+        share = (
+            source.amount / total * Decimal(100)
+        ).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        meals = ", ".join(source.meal_labels)
+        lines.append(
+            f"{index}. {source.food_name} — "
+            f"{format_decimal(source.amount)} г ({share}%) · {meals}"
+        )
+
+    hidden = sources[MAX_MACRO_SOURCES:]
+    if hidden:
+        hidden_total = sum((source.amount for source in hidden), Decimal(0))
+        hidden_share = (
+            hidden_total / total * Decimal(100)
+        ).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        lines.append(
+            f"… ещё {len(hidden)} источн. — "
+            f"{format_decimal(hidden_total)} г ({hidden_share}%)"
+        )
+
+    return "\n".join(lines)
+
+
+def macro_target(user: User, macro: str) -> Decimal | None:
+    """Return the user's target for one supported macro."""
+    if macro == "protein":
+        return user.daily_protein_target_g
+    if macro == "fat":
+        return user.daily_fat_target_g
+    if macro == "carbs":
+        return user.daily_carbs_target_g
+    raise ValueError("unknown macro")

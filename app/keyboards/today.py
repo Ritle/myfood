@@ -1,3 +1,5 @@
+from datetime import date
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -13,6 +15,11 @@ def today_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍽 Что можно съесть?")],
+            [
+                KeyboardButton(text="🥩 Белки подробнее"),
+                KeyboardButton(text="🥑 Жиры подробнее"),
+            ],
+            [KeyboardButton(text="🍞 Углеводы подробнее")],
             [KeyboardButton(text="↩️ Главное меню")],
         ],
         resize_keyboard=True,
@@ -34,3 +41,27 @@ def today_food_recommendations(
         if item.food.id is not None
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+
+def report_macro_details(day: date) -> InlineKeyboardMarkup:
+    """Open protein, fat, and carbohydrate source details for one report day."""
+    token = day.isoformat()
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🥩 Белки",
+                    callback_data=f"today:macro:protein:{token}",
+                ),
+                InlineKeyboardButton(
+                    text="🥑 Жиры",
+                    callback_data=f"today:macro:fat:{token}",
+                ),
+                InlineKeyboardButton(
+                    text="🍞 Углеводы",
+                    callback_data=f"today:macro:carbs:{token}",
+                ),
+            ]
+        ]
+    )

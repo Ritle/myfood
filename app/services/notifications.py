@@ -6,6 +6,7 @@ from aiogram import Bot
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.keyboards.notifications import meal_reminder_actions
+from app.keyboards.today import report_macro_details
 from app.models import NotificationLog, NotificationSettings, User
 from app.repositories.diary_days import get_latest_closed_diary_day
 from app.repositories.notification_settings import (
@@ -424,7 +425,10 @@ async def build_notification(
             timezone_name=user.timezone,
         )
         report = format_today(user, food_entries, water_ml=total_water(water_entries))
-        return report.replace("📊 Сегодня", f"📅 Итоги за {report_day:%d.%m.%Y}", 1), None
+        return (
+            report.replace("📊 Сегодня", f"📅 Итоги за {report_day:%d.%m.%Y}", 1),
+            report_macro_details(report_day),
+        )
     return None, None
 
 

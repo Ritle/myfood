@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.keyboards.day import close_day_confirmation
 from app.keyboards.main_menu import main_menu
-from app.keyboards.today import today_food_recommendations, today_menu
+from app.keyboards.today import (
+    report_macro_details,
+    today_food_recommendations,
+    today_menu,
+)
 from app.repositories.users import get_or_create_user
 from app.services.days import close_diary_day, get_or_create_active_diary_day
 from app.services.diary import get_entries_for_day
@@ -16,10 +20,16 @@ from app.services.food_guidance import (
     recommend_foods_for_today,
     remaining_targets,
 )
-from app.services.today import format_today
+from app.services.today import format_macro_sources, format_today, macro_target
 from app.services.water import get_water_for_day, total_water
 
 router = Router()
+
+MACRO_DETAIL_TEXTS = {
+    "🥩 Белки подробнее": "protein",
+    "🥑 Жиры подробнее": "fat",
+    "🍞 Углеводы подробнее": "carbs",
+}
 
 
 @router.message(Command("today"))
@@ -44,6 +54,76 @@ async def show_today(message: Message, session_factory: async_sessionmaker) -> N
         )
         text = format_today(user, entries, water_ml=total_water(water_entries))
     await message.answer(text, reply_markup=today_menu())
+
+
+@router.message(F.text.in_(set(MACRO_DETAIL_TEXTS)))
+async def show_today_macro_sources(
+    message: Message,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Show where today's selected macro came from."""
+    if message.from_user is None:
+        return
+    macro = MACRO_DETAIL_TEXTS[message.text or ""]
+    async with session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+        )
+        day = await get_or_create_active_diary_day(session, user=user)
+        entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=day.logical_date,
+            timezone_name=user.timezone,
+        )
+        text = format_macro_sources(
+            entries,
+            macro=macro,
+            target=macro_target(user, macro),
+            day_label=day.logical_date.strftime("%d.%m.%Y"),
+        )
+    await message.answer(text, reply_markup=today_menu())
+
+
+@router.callback_query(F.data.startswith("today:macro:"))
+async def show_report_macro_sources(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Show macro sources for the exact day encoded in a report button."""
+    parsed = parse_macro_detail_callback(callback.data)
+    if parsed is None:
+        await callback.answer("Некорректная детализация", show_alert=True)
+        return
+    macro, report_day = parsed
+    async with session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name,
+        )
+        entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=report_day,
+            timezone_name=user.timezone,
+        )
+        text = format_macro_sources(
+            entries,
+            macro=macro,
+            target=None,
+            day_label=report_day.strftime("%d.%m.%Y"),
+        )
+    if callback.message is not None:
+        await callback.message.answer(
+            text,
+            reply_markup=report_macro_details(report_day),
+        )
+    await callback.answer()
 
 
 @router.message(F.text == "🍽 Что можно съесть?")
@@ -171,3 +251,21 @@ async def confirm_close_day(
             reply_markup=main_menu(),
         )
     await callback.answer("День завершён")
+
+
+
+def parse_macro_detail_callback(
+    data: str | None,
+) -> tuple[str, date] | None:
+    """Decode a macro key and report date from an inline callback."""
+    parts = (data or "").split(":")
+    if len(parts) != 4 or parts[:2] != ["today", "macro"]:
+        return None
+    macro = parts[2]
+    if macro not in {"protein", "fat", "carbs"}:
+        return None
+    try:
+        report_day = date.fromisoformat(parts[3])
+    except ValueError:
+        return None
+    return macro, report_day
