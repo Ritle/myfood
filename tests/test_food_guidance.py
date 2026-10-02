@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.models import Base, Food, FoodEntry, User
 from app.services.food_guidance import (
     dominant_deficit,
+    format_food_recommendations,
     format_remaining_guidance,
     recommend_foods_for_today,
     remaining_targets,
@@ -268,5 +269,117 @@ async def test_late_guidance_filters_carb_heavy_used_foods() -> None:
         assert "Рис" in {item.food.name for item in daytime}
         assert "Рис" not in {item.food.name for item in late}
         assert "Куриная грудка" in {item.food.name for item in late}
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_recommendations_prioritize_foods_habitual_for_current_meal() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            user = user_with_targets()
+            user.timezone = "UTC"
+            eggs = Food(
+                name="Яйца",
+                name_normalized="яйца",
+                calories_per_100g=Decimal(150),
+                protein_per_100g=Decimal(20),
+                fat_per_100g=Decimal(7),
+                carbs_per_100g=Decimal(2),
+                is_public=True,
+            )
+            chicken = Food(
+                name="Куриная грудка",
+                name_normalized="куриная грудка",
+                calories_per_100g=Decimal(150),
+                protein_per_100g=Decimal(20),
+                fat_per_100g=Decimal(7),
+                carbs_per_100g=Decimal(2),
+                is_public=True,
+            )
+            session.add_all([user, eggs, chicken])
+            await session.flush()
+
+            historical: list[FoodEntry] = []
+            for index in range(3):
+                historical.append(
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=eggs.id,
+                        meal_type="breakfast",
+                        weight_grams=Decimal(100),
+                        is_full_serving=False,
+                        calories=Decimal(150),
+                        protein=Decimal(20),
+                        fat=Decimal(7),
+                        carbs=Decimal(2),
+                        eaten_at=datetime(
+                            2026, 9, 10 + index, 8, 0, tzinfo=UTC
+                        ),
+                    )
+                )
+                historical.append(
+                    FoodEntry(
+                        user_id=user.id,
+                        food_id=chicken.id,
+                        meal_type="dinner",
+                        weight_grams=Decimal(100),
+                        is_full_serving=False,
+                        calories=Decimal(150),
+                        protein=Decimal(20),
+                        fat=Decimal(7),
+                        carbs=Decimal(2),
+                        eaten_at=datetime(
+                            2026, 9, 10 + index, 19, 0, tzinfo=UTC
+                        ),
+                    )
+                )
+            session.add_all(historical)
+            await session.commit()
+            await session.refresh(user)
+
+            current_entries = [
+                diary_entry(
+                    calories=1200,
+                    protein=50,
+                    fat=40,
+                    carbs=150,
+                )
+            ]
+            morning = datetime(2026, 9, 22, 8, 0, tzinfo=UTC)
+            evening = datetime(2026, 9, 22, 18, 0, tzinfo=UTC)
+
+            breakfast_recommendations = await recommend_foods_for_today(
+                session,
+                user=user,
+                entries=current_entries,
+                limit=2,
+                now=morning,
+            )
+            dinner_recommendations = await recommend_foods_for_today(
+                session,
+                user=user,
+                entries=current_entries,
+                limit=2,
+                now=evening,
+            )
+
+        assert breakfast_recommendations[0].food.name == "Яйца"
+        assert breakfast_recommendations[0].context_hits == 3
+        assert dinner_recommendations[0].food.name == "Куриная грудка"
+        assert dinner_recommendations[0].context_hits == 3
+
+        breakfast_text = format_food_recommendations(
+            user,
+            current_entries,
+            breakfast_recommendations,
+            now=morning,
+        )
+        assert "Учитываю ваши привычные продукты для завтрака" in breakfast_text
     finally:
         await engine.dispose()
