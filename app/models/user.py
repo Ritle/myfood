@@ -24,6 +24,9 @@ class User(Base):
     target_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
     activity_level: Mapped[str | None] = mapped_column(String(24), nullable=True)
     goal: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    target_weight_change_kg_per_week: Mapped[Decimal | None] = mapped_column(
+        Numeric(4, 2), nullable=True
+    )
     daily_calorie_target: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_protein_target_g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
     daily_fat_target_g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
