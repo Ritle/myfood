@@ -115,7 +115,7 @@ async def show_report_macro_sources(
         text = format_macro_sources(
             entries,
             macro=macro,
-            target=macro_target(user, macro),
+            target=None,
             day_label=report_day.strftime("%d.%m.%Y"),
         )
     if callback.message is not None:
