@@ -145,7 +145,7 @@ def macro_sources(
         raise ValueError("unknown macro")
 
     _, field = MACRO_FIELDS[macro]
-    grouped: dict[int, tuple[str, Decimal, set[str]]] = {}
+    grouped: dict[int, tuple[str, Decimal, list[str]]] = {}
     for entry in entries:
         amount = Decimal(getattr(entry, field))
         if amount <= 0:
@@ -153,17 +153,18 @@ def macro_sources(
         label = meal_label(entry.meal_type, entry.snack_number)
         existing = grouped.get(entry.food_id)
         if existing is None:
-            grouped[entry.food_id] = (entry.food.name, amount, {label})
+            grouped[entry.food_id] = (entry.food.name, amount, [label])
         else:
             name, total, meals = existing
-            meals.add(label)
+            if label not in meals:
+                meals.append(label)
             grouped[entry.food_id] = (name, total + amount, meals)
 
     sources = [
         MacroSource(
             food_name=name,
             amount=amount,
-            meal_labels=tuple(sorted(meals)),
+            meal_labels=tuple(meals),
         )
         for name, amount, meals in grouped.values()
     ]
