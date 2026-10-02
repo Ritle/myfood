@@ -17,6 +17,7 @@ from app.repositories.favorite_foods import (
     remove_favorite,
 )
 from app.repositories.food_entries import (
+    food_meal_usage_counts,
     get_latest_food_entry,
     list_food_portion_history,
     list_recent_food_entries,
@@ -395,3 +396,18 @@ async def seed_catalog_foods(
 async def used_foods(session: AsyncSession, *, user_id: int) -> list[Food]:
     """Load all unique active products the user has previously logged."""
     return await list_used_foods(session, user_id=user_id)
+
+
+
+async def meal_food_usage_counts(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    meal_type: str,
+) -> dict[int, int]:
+    """Load per-food usage frequency for one meal context."""
+    return await food_meal_usage_counts(
+        session,
+        user_id=user_id,
+        meal_type=meal_type,
+    )
