@@ -27,13 +27,13 @@ from app.repositories.food_entries import (
     list_used_foods,
 )
 from app.repositories.foods import (
+    FoodSearchCandidate,
     count_foods,
     create_food,
-    FoodSearchCandidate,
     find_foods,
     get_owned_food,
-    list_food_search_candidates,
     get_visible_food,
+    list_food_search_candidates,
 )
 
 
