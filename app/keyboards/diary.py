@@ -76,6 +76,7 @@ def diary_after_add_menu(meal_type: str) -> ReplyKeyboardMarkup:
             KeyboardButton(text=MEAL_LABELS["snack"]),
         ],
         [KeyboardButton(text="📋 Дневник за сегодня")],
+        [KeyboardButton(text="📚 Каталог продуктов")],
         [KeyboardButton(text="↩️ Главное меню")],
     ]
     return ReplyKeyboardMarkup(
