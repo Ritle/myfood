@@ -488,3 +488,154 @@ async def test_search_prioritizes_used_then_owned_then_public_catalog() -> None:
         assert page_one.total_pages == 2
     finally:
         await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_search_ignores_word_order_and_tolerates_small_typos() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=901, first_name="Owner")
+            chicken = Food(
+                name="Куриная грудка охлажденная",
+                name_normalized="куриная грудка охлажденная",
+                calories_per_100g=Decimal(110),
+                protein_per_100g=Decimal(23),
+                fat_per_100g=Decimal(2),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            turkey = Food(
+                name="Грудка индейки",
+                name_normalized="грудка индейки",
+                calories_per_100g=Decimal(115),
+                protein_per_100g=Decimal(22),
+                fat_per_100g=Decimal(3),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            cottage = Food(
+                name="Творог домашний",
+                name_normalized="творог домашний",
+                calories_per_100g=Decimal(120),
+                protein_per_100g=Decimal(18),
+                fat_per_100g=Decimal(5),
+                carbs_per_100g=Decimal(3),
+                is_public=True,
+            )
+            session.add_all([owner, chicken, turkey, cottage])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(chicken)
+            await session.refresh(turkey)
+            await session.refresh(cottage)
+
+            reordered = await search_foods(
+                session,
+                user_id=owner.id,
+                query="грудка куриная",
+                limit=5,
+            )
+            typo = await search_foods(
+                session,
+                user_id=owner.id,
+                query="куриня грутка",
+                limit=5,
+            )
+            cottage_typo = await search_foods(
+                session,
+                user_id=owner.id,
+                query="тварог домашний",
+                limit=5,
+            )
+
+        assert reordered
+        assert reordered[0].id == chicken.id
+        assert typo
+        assert typo[0].id == chicken.id
+        assert cottage_typo
+        assert cottage_typo[0].id == cottage.id
+        assert turkey.id not in {food.id for food in typo}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_search_keeps_personal_priority_and_pagination() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=902, first_name="Owner")
+            session.add(owner)
+            await session.commit()
+            await session.refresh(owner)
+
+            public_exact = Food(
+                name="Куриная грудка",
+                name_normalized="куриная грудка",
+                calories_per_100g=Decimal(110),
+                protein_per_100g=Decimal(23),
+                fat_per_100g=Decimal(2),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            used = Food(
+                name="Грудка куринная фермерская",
+                name_normalized="грудка куринная фермерская",
+                calories_per_100g=Decimal(115),
+                protein_per_100g=Decimal(22),
+                fat_per_100g=Decimal(3),
+                carbs_per_100g=Decimal(0),
+                is_public=True,
+            )
+            session.add_all([public_exact, used])
+            await session.commit()
+            await session.refresh(public_exact)
+            await session.refresh(used)
+
+            owned = await add_user_food(
+                session,
+                user_id=owner.id,
+                name="Куриная грудка домашняя",
+                brand=None,
+                calories=Decimal(112),
+                protein=Decimal(22),
+                fat=Decimal(2),
+                carbs=Decimal(0),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=used,
+                meal_type="lunch",
+                weight_grams=Decimal(150),
+                eaten_at=datetime(2026, 10, 1, 12, tzinfo=UTC),
+            )
+
+            page_one = await search_foods_page(
+                session,
+                user_id=owner.id,
+                query="куриная грутка",
+                page=0,
+                page_size=2,
+            )
+            page_two = await search_foods_page(
+                session,
+                user_id=owner.id,
+                query="куриная грутка",
+                page=1,
+                page_size=2,
+            )
+
+        assert [food.id for food in page_one.items] == [used.id, owned.id]
+        assert [food.id for food in page_two.items] == [public_exact.id]
+        assert page_one.total_pages == 2
+    finally:
+        await engine.dispose()

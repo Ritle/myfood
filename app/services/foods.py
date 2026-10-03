@@ -1,9 +1,11 @@
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from statistics import median
 from typing import Literal
 
+from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,11 +27,13 @@ from app.repositories.food_entries import (
     list_used_foods,
 )
 from app.repositories.foods import (
+    FoodSearchCandidate,
     count_foods,
     create_food,
     find_foods,
     get_owned_food,
     get_visible_food,
+    list_food_search_candidates,
 )
 
 
@@ -60,6 +64,7 @@ HABITUAL_PORTION_MIN_SHARE = Decimal("0.60")
 HABITUAL_PORTION_ABSOLUTE_TOLERANCE_G = Decimal(25)
 HABITUAL_PORTION_RELATIVE_TOLERANCE = Decimal("0.20")
 HABITUAL_PORTION_ROUND_STEP_G = Decimal(5)
+
 
 
 def normalize_food_text(value: str) -> str:
@@ -136,11 +141,20 @@ async def add_user_food(
 async def search_foods(
     session: AsyncSession, *, user_id: int, query: str, limit: int = 10
 ) -> list[Food]:
-    """Search products visible to a user by name and brand."""
-    normalized = normalize_food_text(query)
-    if len(normalized) < 2 or not re.search(r"\w", normalized, flags=re.UNICODE):
-        raise ValueError("Введите не менее двух букв или цифр")
-    return await find_foods(session, user_id=user_id, normalized_query=normalized, limit=limit)
+    """Search visible foods tolerating word order changes and small typos."""
+    if limit < 1:
+        return []
+    normalized, query_tokens = prepare_food_search_query(query)
+    if has_literal_wildcards(normalized):
+        return []
+    candidates = await list_food_search_candidates(session, user_id=user_id)
+    ranked = rank_food_search_candidates(
+        candidates,
+        user_id=user_id,
+        normalized_query=normalized,
+        query_tokens=query_tokens,
+    )
+    return [candidate.food for candidate, _score in ranked[:limit]]
 
 
 async def search_foods_page(
@@ -151,25 +165,150 @@ async def search_foods_page(
     page: int,
     page_size: int = 8,
 ) -> FoodSearchPage:
-    """Search a validated catalog query with bounded pagination."""
+    """Search a validated catalog query with fuzzy ranking and pagination."""
     if page < 0 or not 1 <= page_size <= 20:
         raise ValueError("invalid search page")
-    normalized = normalize_food_text(query)
-    if len(normalized) < 2 or not re.search(r"\w", normalized, flags=re.UNICODE):
-        raise ValueError("Введите не менее двух букв или цифр")
-    total = await count_foods(
-        session, user_id=user_id, normalized_query=normalized
-    )
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    actual_page = min(page, total_pages - 1)
-    items = await find_foods(
-        session,
+    normalized, query_tokens = prepare_food_search_query(query)
+    if has_literal_wildcards(normalized):
+        return FoodSearchPage(items=[], page=0, total_pages=1)
+
+    candidates = await list_food_search_candidates(session, user_id=user_id)
+    ranked = rank_food_search_candidates(
+        candidates,
         user_id=user_id,
         normalized_query=normalized,
-        limit=page_size,
-        offset=actual_page * page_size,
+        query_tokens=query_tokens,
     )
+    total = len(ranked)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    actual_page = min(page, total_pages - 1)
+    start = actual_page * page_size
+    items = [
+        candidate.food
+        for candidate, _score in ranked[start : start + page_size]
+    ]
     return FoodSearchPage(items=items, page=actual_page, total_pages=total_pages)
+
+
+def prepare_food_search_query(query: str) -> tuple[str, tuple[str, ...]]:
+    """Normalize a human query and split it into order-independent word tokens."""
+    normalized = normalize_food_text(query)
+    tokens = tuple(re.findall(r"\w+", normalized, flags=re.UNICODE))
+    if len(normalized) < 2 or not tokens:
+        raise ValueError("Введите не менее двух букв или цифр")
+    return normalized, tokens
+
+
+def has_literal_wildcards(normalized_query: str) -> bool:
+    """Keep SQL-like wildcard characters literal instead of treating them as fuzzy input."""
+    return "%" in normalized_query or "_" in normalized_query
+
+
+def rank_food_search_candidates(
+    candidates: list[FoodSearchCandidate],
+    *,
+    user_id: int,
+    normalized_query: str,
+    query_tokens: tuple[str, ...],
+) -> list[tuple[FoodSearchCandidate, float]]:
+    """Filter and rank catalog candidates while preserving personal priority."""
+    ranked: list[tuple[FoodSearchCandidate, float]] = []
+    for candidate in candidates:
+        food = candidate.food
+        searchable = " ".join(
+            value
+            for value in (food.name_normalized, food.brand_normalized)
+            if value
+        )
+        candidate_tokens = tuple(re.findall(r"\w+", searchable, flags=re.UNICODE))
+        score = fuzzy_food_match_score(
+            normalized_query=normalized_query,
+            query_tokens=query_tokens,
+            candidate_text=searchable,
+            candidate_tokens=candidate_tokens,
+        )
+        if score is None:
+            continue
+        ranked.append((candidate, score))
+
+    ranked.sort(
+        key=lambda item: (
+            food_search_priority(item[0], user_id=user_id),
+            -item[1],
+            -item[0].usage_count,
+            -search_recency_value(item[0].last_used_at),
+            item[0].food.name.casefold(),
+            item[0].food.id or 0,
+        )
+    )
+    return ranked
+
+
+def fuzzy_food_match_score(
+    *,
+    normalized_query: str,
+    query_tokens: tuple[str, ...],
+    candidate_text: str,
+    candidate_tokens: tuple[str, ...],
+) -> float | None:
+    """Return an order-independent fuzzy score when every query word is represented."""
+    if not candidate_tokens:
+        return None
+
+    token_scores: list[float] = []
+    for query_token in query_tokens:
+        best = max(
+            food_token_similarity(query_token, candidate_token)
+            for candidate_token in candidate_tokens
+        )
+        if best < fuzzy_token_threshold(query_token):
+            return None
+        token_scores.append(best)
+
+    token_average = sum(token_scores) / len(token_scores)
+    phrase_score = fuzz.token_set_ratio(normalized_query, candidate_text)
+    return token_average * 0.75 + phrase_score * 0.25
+
+
+def food_token_similarity(query_token: str, candidate_token: str) -> float:
+    """Compare one word, rewarding exact and prefix matches before edit similarity."""
+    if query_token == candidate_token:
+        return 100.0
+    if candidate_token.startswith(query_token) and len(query_token) >= 2:
+        return 96.0
+    if query_token.startswith(candidate_token) and len(candidate_token) >= 3:
+        return 92.0
+    return float(fuzz.ratio(query_token, candidate_token))
+
+
+def fuzzy_token_threshold(token: str) -> float:
+    """Use stricter thresholds for short words to reduce accidental matches."""
+    length = len(token)
+    if length <= 2:
+        return 90.0
+    if length == 3:
+        return 66.0
+    if length == 4:
+        return 72.0
+    return 75.0
+
+
+def food_search_priority(candidate: FoodSearchCandidate, *, user_id: int) -> int:
+    """Keep used foods first, then user-created foods, then the public catalog."""
+    if candidate.usage_count > 0:
+        return 0
+    if candidate.food.created_by_user_id == user_id:
+        return 1
+    return 2
+
+
+def search_recency_value(value: datetime | None) -> float:
+    """Convert a possibly-naive SQLite timestamp into a sortable numeric value."""
+    if value is None:
+        return 0.0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.timestamp()
 
 
 async def dish_catalog_page(
