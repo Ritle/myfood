@@ -1,7 +1,19 @@
+from dataclasses import dataclass
+from datetime import datetime
+
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Food, FoodEntry
+
+
+@dataclass(frozen=True, slots=True)
+class FoodSearchCandidate:
+    """Visible food plus user-specific usage metadata for fuzzy ranking."""
+
+    food: Food
+    usage_count: int
+    last_used_at: datetime | None
 
 
 async def create_food(session: AsyncSession, food: Food) -> Food:
@@ -10,6 +22,47 @@ async def create_food(session: AsyncSession, food: Food) -> Food:
     await session.commit()
     await session.refresh(food)
     return food
+
+
+async def list_food_search_candidates(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    catalog_section: str | None = None,
+) -> list[FoodSearchCandidate]:
+    """Load visible active foods with usage metadata for in-memory fuzzy search."""
+    visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
+    usage = (
+        select(
+            FoodEntry.food_id.label("food_id"),
+            func.count(FoodEntry.id).label("usage_count"),
+            func.max(FoodEntry.eaten_at).label("last_used_at"),
+        )
+        .where(FoodEntry.user_id == user_id)
+        .group_by(FoodEntry.food_id)
+        .subquery()
+    )
+    rows = await session.execute(
+        select(
+            Food,
+            func.coalesce(usage.c.usage_count, 0),
+            usage.c.last_used_at,
+        )
+        .outerjoin(usage, usage.c.food_id == Food.id)
+        .where(
+            Food.is_archived.is_(False),
+            visibility,
+            *([Food.catalog_section == catalog_section] if catalog_section else []),
+        )
+    )
+    return [
+        FoodSearchCandidate(
+            food=food,
+            usage_count=int(usage_count),
+            last_used_at=last_used_at,
+        )
+        for food, usage_count, last_used_at in rows.all()
+    ]
 
 
 async def find_foods(
