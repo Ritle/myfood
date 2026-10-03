@@ -29,6 +29,7 @@ from app.repositories.food_entries import (
 from app.repositories.foods import (
     count_foods,
     create_food,
+    FoodSearchCandidate,
     find_foods,
     get_owned_food,
     list_food_search_candidates,
@@ -64,7 +65,6 @@ HABITUAL_PORTION_ABSOLUTE_TOLERANCE_G = Decimal(25)
 HABITUAL_PORTION_RELATIVE_TOLERANCE = Decimal("0.20")
 HABITUAL_PORTION_ROUND_STEP_G = Decimal(5)
 
-FUZZY_SEARCH_MAX_CANDIDATES = 20_000
 
 
 def normalize_food_text(value: str) -> str:
@@ -205,17 +205,14 @@ def has_literal_wildcards(normalized_query: str) -> bool:
 
 
 def rank_food_search_candidates(
-    candidates,
+    candidates: list[FoodSearchCandidate],
     *,
     user_id: int,
     normalized_query: str,
     query_tokens: tuple[str, ...],
-):
+) -> list[tuple[FoodSearchCandidate, float]]:
     """Filter and rank catalog candidates while preserving personal priority."""
-    if len(candidates) > FUZZY_SEARCH_MAX_CANDIDATES:
-        candidates = candidates[:FUZZY_SEARCH_MAX_CANDIDATES]
-
-    ranked = []
+    ranked: list[tuple[FoodSearchCandidate, float]] = []
     for candidate in candidates:
         food = candidate.food
         searchable = " ".join(
@@ -296,7 +293,7 @@ def fuzzy_token_threshold(token: str) -> float:
     return 75.0
 
 
-def food_search_priority(candidate, *, user_id: int) -> int:
+def food_search_priority(candidate: FoodSearchCandidate, *, user_id: int) -> int:
     """Keep used foods first, then user-created foods, then the public catalog."""
     if candidate.usage_count > 0:
         return 0
