@@ -7,6 +7,8 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.keyboards.food import (
+    created_food_diary_offer,
+    created_food_meal_choices,
     dish_results,
     food_card_actions,
     food_edit_cancel,
@@ -18,6 +20,7 @@ from app.keyboards.food import (
 from app.keyboards.main_menu import main_menu
 from app.models import Food, User
 from app.repositories.users import get_or_create_user
+from app.services.diary import MEAL_LABELS, suggest_meal_type
 from app.services.foods import (
     add_user_food,
     dish_catalog_page,
@@ -370,6 +373,45 @@ async def toggle_favorite(
     await callback.answer(
         "Добавлено в избранное" if favorite else "Удалено из избранного"
     )
+
+
+@router.callback_query(F.data.startswith("food:created:meals:"))
+async def choose_created_food_meal(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Expand meal choices for a just-created private food or dish."""
+    try:
+        food_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Некорректный продукт", show_alert=True)
+        return
+    if food_id <= 0:
+        await callback.answer("Некорректный продукт", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name,
+        )
+        food = await load_food(session, user_id=user.id, food_id=food_id)
+
+    if (
+        food is None
+        or food.created_by_user_id != user.id
+        or food.is_public
+    ):
+        await callback.answer("Продукт больше недоступен", show_alert=True)
+        return
+
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(
+            reply_markup=created_food_meal_choices(food_id)
+        )
+    await callback.answer("Выберите приём пищи")
 
 
 @router.callback_query(F.data.startswith("food:edit:"))
@@ -725,6 +767,7 @@ async def enter_food_carbs(
             carbs=carbs,
             catalog_section=catalog_section,
         )
+        suggested_meal_type = suggest_meal_type(user.timezone)
     await state.clear()
     kind = "Блюдо" if catalog_section == "dish" else "Продукт"
     await message.answer(
@@ -735,4 +778,14 @@ async def enter_food_carbs(
             else f"{kind} «{product.name}» сохранен в вашем каталоге."
         ),
         reply_markup=food_menu(),
+    )
+    await message.answer(
+        (
+            f"Добавить «{product.name}» в дневник? "
+            f"По времени предлагаю: {MEAL_LABELS[suggested_meal_type]}."
+        ),
+        reply_markup=created_food_diary_offer(
+            product.id,
+            suggested_meal_type=suggested_meal_type,
+        ),
     )

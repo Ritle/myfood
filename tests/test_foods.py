@@ -8,7 +8,12 @@ from app.data import BASE_FOODS, FNDDS_FOODS, FOUNDATION_FOODS
 from app.data.health_diet import load_health_diet_foods
 from app.handlers.food import answer_food_card, food_card_text
 from app.keyboards.diary import diary_recent_food_results
-from app.keyboards.food import food_card_actions, food_results
+from app.keyboards.food import (
+    created_food_diary_offer,
+    created_food_meal_choices,
+    food_card_actions,
+    food_results,
+)
 from app.models import Base, Food, User
 from app.services.diary import add_diary_entry
 from app.services.foods import (
@@ -28,6 +33,38 @@ from app.services.foods import (
 )
 
 HEALTH_DIET_FOODS = load_health_diet_foods()
+
+
+
+def test_created_food_offer_prioritizes_suggested_meal_and_allows_override() -> None:
+    offer = created_food_diary_offer(42, suggested_meal_type="lunch")
+    first_button = offer.inline_keyboard[0][0]
+    change_button = offer.inline_keyboard[1][0]
+
+    assert first_button.text == "➕ Добавить в 🍲 Обед"
+    assert first_button.callback_data == "diary:add:lunch:42"
+    assert change_button.text == "↔️ Изменить приём пищи"
+    assert change_button.callback_data == "food:created:meals:42"
+
+    choices = created_food_meal_choices(42)
+    callbacks = [
+        button.callback_data
+        for row in choices.inline_keyboard
+        for button in row
+    ]
+    assert callbacks == [
+        "diary:add:breakfast:42",
+        "diary:add:lunch:42",
+        "diary:add:dinner:42",
+        "diary:add:snack:42",
+    ]
+
+
+@pytest.mark.parametrize("meal_type", ["breakfast", "lunch", "dinner", "snack"])
+def test_created_food_offer_supports_every_diary_meal(meal_type: str) -> None:
+    offer = created_food_diary_offer(7, suggested_meal_type=meal_type)
+
+    assert offer.inline_keyboard[0][0].callback_data == f"diary:add:{meal_type}:7"
 
 
 @pytest.mark.asyncio

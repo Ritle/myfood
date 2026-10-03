@@ -6,6 +6,7 @@ from aiogram.types import (
 )
 
 from app.models import Food
+from app.services.diary import MEAL_LABELS
 from app.utils.formatting import format_decimal
 
 _MAX_RESULT_NAME_LENGTH = 28
@@ -137,5 +138,62 @@ def food_edit_cancel(food_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Отмена", callback_data=f"food:editcancel:{food_id}")]
+        ]
+    )
+
+
+
+def created_food_diary_offer(
+    food_id: int,
+    *,
+    suggested_meal_type: str,
+) -> InlineKeyboardMarkup:
+    """Offer one-tap diary adding to the time-prioritized meal."""
+    if suggested_meal_type not in MEAL_LABELS:
+        raise ValueError("unknown meal type")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"➕ Добавить в {MEAL_LABELS[suggested_meal_type]}",
+                    callback_data=(
+                        f"diary:add:{suggested_meal_type}:{food_id}"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="↔️ Изменить приём пищи",
+                    callback_data=f"food:created:meals:{food_id}",
+                )
+            ],
+        ]
+    )
+
+
+def created_food_meal_choices(food_id: int) -> InlineKeyboardMarkup:
+    """Let the user override the suggested meal before adding a new food."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=MEAL_LABELS["breakfast"],
+                    callback_data=f"diary:add:breakfast:{food_id}",
+                ),
+                InlineKeyboardButton(
+                    text=MEAL_LABELS["lunch"],
+                    callback_data=f"diary:add:lunch:{food_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=MEAL_LABELS["dinner"],
+                    callback_data=f"diary:add:dinner:{food_id}",
+                ),
+                InlineKeyboardButton(
+                    text=MEAL_LABELS["snack"],
+                    callback_data=f"diary:add:snack:{food_id}",
+                ),
+            ],
         ]
     )
