@@ -1,7 +1,7 @@
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Food
+from app.models import Food, FoodEntry
 
 
 async def create_food(session: AsyncSession, food: Food) -> Food:
@@ -21,10 +21,37 @@ async def find_foods(
     offset: int = 0,
     catalog_section: str | None = None,
 ) -> list[Food]:
-    """Find visible, active foods by normalized name or brand."""
+    """Find visible foods ordered by personal history, ownership, and relevance."""
     visibility = or_(Food.is_public.is_(True), Food.created_by_user_id == user_id)
+    usage = (
+        select(
+            FoodEntry.food_id.label("food_id"),
+            func.count(FoodEntry.id).label("usage_count"),
+            func.max(FoodEntry.eaten_at).label("last_used_at"),
+        )
+        .where(FoodEntry.user_id == user_id)
+        .group_by(FoodEntry.food_id)
+        .subquery()
+    )
+
+    usage_count = func.coalesce(usage.c.usage_count, 0)
+    priority = case(
+        (usage_count > 0, 0),
+        (Food.created_by_user_id == user_id, 1),
+        else_=2,
+    )
+    relevance = case(
+        (Food.name_normalized == normalized_query, 0),
+        (Food.name_normalized.startswith(normalized_query, autoescape=True), 1),
+        (Food.name_normalized.contains(normalized_query, autoescape=True), 2),
+        (Food.brand_normalized == normalized_query, 3),
+        (Food.brand_normalized.startswith(normalized_query, autoescape=True), 4),
+        else_=5,
+    )
+
     result = await session.scalars(
         select(Food)
+        .outerjoin(usage, usage.c.food_id == Food.id)
         .where(
             Food.is_archived.is_(False),
             visibility,
@@ -34,7 +61,14 @@ async def find_foods(
             ),
             *([Food.catalog_section == catalog_section] if catalog_section else []),
         )
-        .order_by(Food.is_public.desc(), Food.name)
+        .order_by(
+            priority,
+            relevance,
+            usage_count.desc(),
+            usage.c.last_used_at.desc(),
+            Food.name,
+            Food.id,
+        )
         .offset(offset)
         .limit(limit)
     )
