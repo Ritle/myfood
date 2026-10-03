@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -348,5 +349,142 @@ async def test_catalog_pagination_favorites_and_recent_foods() -> None:
                 button.callback_data == f"diary:repeat:lunch:{last_entry.id}"
                 for button in buttons
             )
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_search_prioritizes_used_then_owned_then_public_catalog() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=801, first_name="Owner")
+            session.add(owner)
+            await session.commit()
+            await session.refresh(owner)
+
+            used_often = Food(
+                name="Протеин батончик",
+                name_normalized="протеин батончик",
+                calories_per_100g=Decimal(200),
+                protein_per_100g=Decimal(25),
+                fat_per_100g=Decimal(5),
+                carbs_per_100g=Decimal(15),
+                is_public=True,
+            )
+            used_recently = Food(
+                name="Протеин йогурт",
+                name_normalized="протеин йогурт",
+                calories_per_100g=Decimal(90),
+                protein_per_100g=Decimal(12),
+                fat_per_100g=Decimal(2),
+                carbs_per_100g=Decimal(6),
+                is_public=True,
+            )
+            public_exact = Food(
+                name="Протеин",
+                name_normalized="протеин",
+                calories_per_100g=Decimal(150),
+                protein_per_100g=Decimal(20),
+                fat_per_100g=Decimal(4),
+                carbs_per_100g=Decimal(8),
+                is_public=True,
+            )
+            session.add_all([used_often, used_recently, public_exact])
+            await session.commit()
+            await session.refresh(used_often)
+            await session.refresh(used_recently)
+            await session.refresh(public_exact)
+
+            owned_unused = await add_user_food(
+                session,
+                user_id=owner.id,
+                name="Протеин домашний",
+                brand=None,
+                calories=Decimal(130),
+                protein=Decimal(22),
+                fat=Decimal(3),
+                carbs=Decimal(5),
+            )
+            owned_used = await add_user_food(
+                session,
+                user_id=owner.id,
+                name="Протеин творожный",
+                brand=None,
+                calories=Decimal(140),
+                protein=Decimal(24),
+                fat=Decimal(4),
+                carbs=Decimal(4),
+            )
+
+            start = datetime(2026, 9, 20, 8, tzinfo=UTC)
+            for index in range(3):
+                await add_diary_entry(
+                    session,
+                    user_id=owner.id,
+                    food=used_often,
+                    meal_type="breakfast",
+                    weight_grams=Decimal(50),
+                    eaten_at=start + timedelta(days=index),
+                )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=owned_used,
+                meal_type="breakfast",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 23, 8, tzinfo=UTC),
+            )
+            await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=used_recently,
+                meal_type="breakfast",
+                weight_grams=Decimal(100),
+                eaten_at=datetime(2026, 9, 24, 8, tzinfo=UTC),
+            )
+
+            results = await search_foods(
+                session,
+                user_id=owner.id,
+                query="протеин",
+                limit=10,
+            )
+            page_one = await search_foods_page(
+                session,
+                user_id=owner.id,
+                query="протеин",
+                page=0,
+                page_size=3,
+            )
+            page_two = await search_foods_page(
+                session,
+                user_id=owner.id,
+                query="протеин",
+                page=1,
+                page_size=3,
+            )
+
+        assert [food.id for food in results] == [
+            used_often.id,
+            used_recently.id,
+            owned_used.id,
+            owned_unused.id,
+            public_exact.id,
+        ]
+        assert {food.id for food in page_one.items} == {
+            used_often.id,
+            used_recently.id,
+            owned_used.id,
+        }
+        assert [food.id for food in page_two.items] == [
+            owned_unused.id,
+            public_exact.id,
+        ]
+        assert page_one.total_pages == 2
     finally:
         await engine.dispose()
