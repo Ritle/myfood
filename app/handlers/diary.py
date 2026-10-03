@@ -25,7 +25,6 @@ from app.keyboards.diary import (
     diary_portion_keyboard,
     diary_recent_food_results,
     diary_source_actions,
-    finish_diary_adding_text,
     frequent_combo_confirmation,
     meal_template_delete_confirmation,
 )
