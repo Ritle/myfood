@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.handlers.diary import format_diary, is_diary_search_text
 from app.keyboards.diary import (
+    ADD_MORE_FOOD_TEXT,
     FINISH_DIARY_ADDING_TEXT,
+    diary_after_add_menu,
     diary_menu,
     diary_portion_keyboard,
     finish_diary_adding_text,
@@ -68,9 +70,17 @@ def test_active_meal_entry_has_explicit_finish_action() -> None:
         for button in row
     }
 
+    after_add_labels = {
+        button.text
+        for row in diary_after_add_menu("breakfast").keyboard
+        for button in row
+    }
+
     assert FINISH_DIARY_ADDING_TEXT in active_labels
     assert FINISH_DIARY_ADDING_TEXT in portion_labels
     assert FINISH_DIARY_ADDING_TEXT not in normal_labels
+    assert ADD_MORE_FOOD_TEXT in after_add_labels
+    assert "✅ Завершить завтрак" in after_add_labels
 
 
 def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
@@ -174,6 +184,7 @@ def test_diary_search_leaves_meal_and_navigation_buttons_for_their_handlers() ->
     assert not is_diary_search_text("📚 Каталог продуктов")
     assert not is_diary_search_text("↩️ Главное меню")
     assert not is_diary_search_text(FINISH_DIARY_ADDING_TEXT)
+    assert not is_diary_search_text(ADD_MORE_FOOD_TEXT)
     assert not is_diary_search_text("/today")
 
 

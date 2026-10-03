@@ -14,6 +14,7 @@ from app.services.foods import RecentFoodPortion
 from app.utils.formatting import format_decimal
 from app.utils.portions import QUICK_PORTIONS
 
+ADD_MORE_FOOD_TEXT = "➕ Добавить ещё"
 FINISH_DIARY_ADDING_TEXT = "✅ Завершить добавление"
 FINISH_MEAL_TEXTS = {
     "breakfast": "✅ Завершить завтрак",
@@ -57,6 +58,32 @@ def diary_menu(
         ]
     )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def diary_after_add_menu(meal_type: str) -> ReplyKeyboardMarkup:
+    """Keep the next action obvious immediately after saving food."""
+    rows = [
+        [
+            KeyboardButton(text=ADD_MORE_FOOD_TEXT),
+            KeyboardButton(text=finish_diary_adding_text(meal_type)),
+        ],
+        [
+            KeyboardButton(text=MEAL_LABELS["breakfast"]),
+            KeyboardButton(text=MEAL_LABELS["lunch"]),
+        ],
+        [
+            KeyboardButton(text=MEAL_LABELS["dinner"]),
+            KeyboardButton(text=MEAL_LABELS["snack"]),
+        ],
+        [KeyboardButton(text="📋 Дневник за сегодня")],
+        [KeyboardButton(text="📚 Каталог продуктов")],
+        [KeyboardButton(text="↩️ Главное меню")],
+    ]
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        input_field_placeholder="Добавить ещё или завершить приём",
+    )
 
 
 def diary_portion_keyboard(
