@@ -291,7 +291,7 @@ def diary_post_add_actions(entry: FoodEntry) -> InlineKeyboardMarkup:
     buttons.append(
         InlineKeyboardButton(
             text="🗑 Удалить",
-            callback_data=f"diary:delete:{entry.id}",
+            callback_data=f"diary:quick_delete:{entry.id}",
         )
     )
     buttons.append(
