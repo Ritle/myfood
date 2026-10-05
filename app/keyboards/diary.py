@@ -15,6 +15,7 @@ from app.utils.formatting import format_decimal
 from app.utils.portions import QUICK_PORTIONS
 
 ADD_MORE_FOOD_TEXT = "➕ Добавить ещё"
+CHANGE_MEAL_TEXT = "🔄 Сменить приём пищи"
 FINISH_DIARY_ADDING_TEXT = "✅ Завершить добавление"
 FINISH_MEAL_TEXTS = {
     "breakfast": "✅ Завершить завтрак",
@@ -31,25 +32,27 @@ def finish_diary_adding_text(meal_type: str | None) -> str:
 def diary_menu(
     *, adding: bool = False, meal_type: str | None = None
 ) -> ReplyKeyboardMarkup:
-    """Build meal selection and diary navigation.
+    """Build diary navigation without repeatedly asking for the meal.
 
-    During an active meal-entry session, show an explicit finish action so
-    the selected meal can stay active across multiple added products.
+    During an active entry session the current meal stays selected until the
+    user explicitly asks to change it.
     """
-    rows = [
-        [
-            KeyboardButton(text=MEAL_LABELS["breakfast"]),
-            KeyboardButton(text=MEAL_LABELS["lunch"]),
-        ],
-        [
-            KeyboardButton(text=MEAL_LABELS["dinner"]),
-            KeyboardButton(text=MEAL_LABELS["snack"]),
-        ],
-    ]
     if adding:
-        rows.append(
-            [KeyboardButton(text=finish_diary_adding_text(meal_type))]
-        )
+        rows = [
+            [KeyboardButton(text=CHANGE_MEAL_TEXT)],
+            [KeyboardButton(text=finish_diary_adding_text(meal_type))],
+        ]
+    else:
+        rows = [
+            [
+                KeyboardButton(text=MEAL_LABELS["breakfast"]),
+                KeyboardButton(text=MEAL_LABELS["lunch"]),
+            ],
+            [
+                KeyboardButton(text=MEAL_LABELS["dinner"]),
+                KeyboardButton(text=MEAL_LABELS["snack"]),
+            ],
+        ]
     rows.extend(
         [
             [KeyboardButton(text="📋 Дневник за сегодня")],
@@ -61,20 +64,13 @@ def diary_menu(
 
 
 def diary_after_add_menu(meal_type: str) -> ReplyKeyboardMarkup:
-    """Keep the next action obvious immediately after saving food."""
+    """Keep the current meal active unless the user explicitly changes it."""
     rows = [
         [
             KeyboardButton(text=ADD_MORE_FOOD_TEXT),
             KeyboardButton(text=finish_diary_adding_text(meal_type)),
         ],
-        [
-            KeyboardButton(text=MEAL_LABELS["breakfast"]),
-            KeyboardButton(text=MEAL_LABELS["lunch"]),
-        ],
-        [
-            KeyboardButton(text=MEAL_LABELS["dinner"]),
-            KeyboardButton(text=MEAL_LABELS["snack"]),
-        ],
+        [KeyboardButton(text=CHANGE_MEAL_TEXT)],
         [KeyboardButton(text="📋 Дневник за сегодня")],
         [KeyboardButton(text="📚 Каталог продуктов")],
         [KeyboardButton(text="↩️ Главное меню")],
@@ -123,6 +119,24 @@ def diary_portion_keyboard(
         resize_keyboard=True,
         input_field_placeholder="Выберите порцию или введите граммы",
     )
+
+
+def diary_meal_switcher(current_meal_type: str | None = None) -> InlineKeyboardMarkup:
+    """Show meal choices only after the user explicitly requests a change."""
+    rows = []
+    for meal_type in ("breakfast", "lunch", "dinner", "snack"):
+        label = MEAL_LABELS[meal_type]
+        if meal_type == current_meal_type:
+            label = f"✓ {label}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"diary:switch_meal:{meal_type}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def diary_batch_confirmation() -> InlineKeyboardMarkup:

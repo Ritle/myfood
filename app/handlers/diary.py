@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.keyboards.diary import (
     ADD_MORE_FOOD_TEXT,
+    CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     FINISH_MEAL_TEXTS,
     delete_confirmation,
@@ -20,6 +21,7 @@ from app.keyboards.diary import (
     diary_entry_actions,
     diary_food_page,
     diary_food_results,
+    diary_meal_switcher,
     diary_meal_templates,
     diary_menu,
     diary_portion_keyboard,
@@ -100,6 +102,7 @@ DIARY_NAVIGATION_TEXTS = {
     "↩️ Главное меню",
     "🌙 Завершить день",
     ADD_MORE_FOOD_TEXT,
+    CHANGE_MEAL_TEXT,
     *DIARY_FINISH_TEXTS,
 }
 
@@ -136,15 +139,81 @@ async def open_diary(
         {"meal_type": meal_type, "snack_number": snack_number}
     )
     await message.answer(
-        f"Предлагаю записать в «{meal_label(meal_type, snack_number)}». "
-        "Введите продукт или бренд; "
-        "при необходимости смените прием пищи кнопкой ниже.",
+        f"Добавляем в «{meal_label(meal_type, snack_number)}». "
+        "Введите продукт или бренд. "
+        "Приём пищи выбран автоматически по времени; меняйте его только при необходимости.",
         reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await message.answer(
         "Можно также выбрать продукт из готового списка:",
         reply_markup=diary_source_actions(meal_type),
     )
+
+
+@router.message(F.text == CHANGE_MEAL_TEXT)
+async def request_meal_change(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Show meal choices only when the user explicitly wants to change context."""
+    data = await state.get_data()
+    meal_type = data.get("meal_type")
+    snack_number = data.get("snack_number")
+    current_label = (
+        meal_label(meal_type, snack_number)
+        if meal_type in MEAL_LABELS
+        else "не выбран"
+    )
+    await message.answer(
+        f"Сейчас добавляем в «{current_label}». Выберите другой приём пищи:",
+        reply_markup=diary_meal_switcher(
+            meal_type if meal_type in MEAL_LABELS else None
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("diary:switch_meal:"))
+async def switch_active_meal(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Switch the active meal only after an explicit user action."""
+    meal_type = (callback.data or "").rsplit(":", 1)[-1]
+    if meal_type not in MEAL_LABELS:
+        await callback.answer("Некорректный приём пищи", show_alert=True)
+        return
+
+    current = await state.get_data()
+    snack_number = None
+    if meal_type == "snack":
+        current_number = current.get("snack_number")
+        if current.get("meal_type") == "snack" and isinstance(current_number, int):
+            snack_number = current_number
+        else:
+            async with session_factory() as session:
+                user = await ensure_user(session, callback.from_user)
+                snack_number = next_snack_number(await today_entries(session, user))
+
+    await state.set_state(DiaryAdd.query)
+    await state.set_data(
+        {"meal_type": meal_type, "snack_number": snack_number}
+    )
+    if callback.message is not None:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+        await callback.message.answer(
+            f"Теперь добавляем в «{meal_label(meal_type, snack_number)}». "
+            "Введите продукт или бренд.",
+            reply_markup=diary_menu(adding=True, meal_type=meal_type),
+        )
+        await callback.message.answer(
+            "Или выберите из готового списка:",
+            reply_markup=diary_source_actions(meal_type),
+        )
+    await callback.answer("Приём пищи изменён")
 
 
 @router.message(F.text.in_(MEAL_BUTTONS))
@@ -170,9 +239,8 @@ async def choose_meal(
         {"meal_type": meal_type, "snack_number": snack_number}
     )
     await message.answer(
-        f"Выбрано «{meal_label(meal_type, snack_number)}». "
-        "Введите продукт или бренд; "
-        "при необходимости смените прием пищи кнопкой ниже.",
+        f"Теперь добавляем в «{meal_label(meal_type, snack_number)}». "
+        "Введите продукт или бренд.",
         reply_markup=diary_menu(adding=True, meal_type=meal_type),
     )
     await message.answer(
