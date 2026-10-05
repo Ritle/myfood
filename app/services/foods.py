@@ -21,6 +21,7 @@ from app.repositories.favorite_foods import (
 from app.repositories.food_entries import (
     food_meal_usage_counts,
     get_latest_food_entry,
+    list_food_portion_histories,
     list_food_portion_history,
     list_recent_food_entries,
     list_recent_foods,
@@ -453,7 +454,39 @@ async def habitual_food_portion(
         food_id=food_id,
         limit=HABITUAL_PORTION_HISTORY_LIMIT,
     )
-    weights = [Decimal(entry.weight_grams) for entry in entries]
+    return infer_habitual_portion(
+        [Decimal(entry.weight_grams) for entry in entries]
+    )
+
+
+async def habitual_food_portions(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    foods: list[Food],
+) -> dict[int, Decimal]:
+    """Infer habitual portions for a search page with one history query."""
+    weighed_ids = [
+        food.id
+        for food in foods
+        if food.id is not None and food.nutrition_basis != "portion"
+    ]
+    histories = await list_food_portion_histories(
+        session,
+        user_id=user_id,
+        food_ids=weighed_ids,
+        limit_per_food=HABITUAL_PORTION_HISTORY_LIMIT,
+    )
+    portions: dict[int, Decimal] = {}
+    for food_id, weights in histories.items():
+        portion = infer_habitual_portion(weights)
+        if portion is not None:
+            portions[food_id] = portion
+    return portions
+
+
+def infer_habitual_portion(weights: list[Decimal]) -> Decimal | None:
+    """Infer one rounded stable portion from recent weighed samples."""
     if len(weights) < HABITUAL_PORTION_MIN_SAMPLES:
         return None
 
