@@ -278,6 +278,33 @@ def diary_food_page(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def diary_post_add_actions(entry: FoodEntry) -> InlineKeyboardMarkup:
+    """Build direct actions for the entry that was just saved."""
+    buttons: list[InlineKeyboardButton] = []
+    if not entry.is_full_serving:
+        buttons.append(
+            InlineKeyboardButton(
+                text="⚖️ Изменить вес",
+                callback_data=f"diary:quick_edit:{entry.id}",
+            )
+        )
+    buttons.append(
+        InlineKeyboardButton(
+            text="🗑 Удалить",
+            callback_data=f"diary:delete:{entry.id}",
+        )
+    )
+    buttons.append(
+        InlineKeyboardButton(
+            text="↻ Повторить",
+            callback_data=(
+                f"diary:repeat:{entry.meal_type}:{entry.id}"
+            ),
+        )
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
 def diary_entry_actions(entries: list[FoodEntry]) -> InlineKeyboardMarkup:
     """Build edit and delete actions for each diary entry."""
     rows: list[list[InlineKeyboardButton]] = []
