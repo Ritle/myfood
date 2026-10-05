@@ -56,6 +56,7 @@ from app.services.diary import (
 from app.services.foods import (
     favorite_foods,
     habitual_food_portion,
+    habitual_food_portions,
     latest_food_portion_entry,
     load_food,
     normalize_food_text,
@@ -134,6 +135,11 @@ async def open_diary(
             if meal_type == "snack"
             else None
         )
+        recent_items = await recent_food_portions(
+            session,
+            user_id=user.id,
+            limit=5,
+        )
     await state.set_state(DiaryAdd.query)
     await state.set_data(
         {"meal_type": meal_type, "snack_number": snack_number}
@@ -148,6 +154,7 @@ async def open_diary(
         "Можно также выбрать продукт из готового списка:",
         reply_markup=diary_source_actions(meal_type),
     )
+    await send_quick_recent_foods(message, recent_items, meal_type)
 
 
 @router.message(F.text == CHANGE_MEAL_TEXT)
@@ -186,14 +193,19 @@ async def switch_active_meal(
 
     current = await state.get_data()
     snack_number = None
-    if meal_type == "snack":
-        current_number = current.get("snack_number")
-        if current.get("meal_type") == "snack" and isinstance(current_number, int):
-            snack_number = current_number
-        else:
-            async with session_factory() as session:
-                user = await ensure_user(session, callback.from_user)
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        if meal_type == "snack":
+            current_number = current.get("snack_number")
+            if current.get("meal_type") == "snack" and isinstance(current_number, int):
+                snack_number = current_number
+            else:
                 snack_number = next_snack_number(await today_entries(session, user))
+        recent_items = await recent_food_portions(
+            session,
+            user_id=user.id,
+            limit=5,
+        )
 
     await state.set_state(DiaryAdd.query)
     await state.set_data(
@@ -213,6 +225,11 @@ async def switch_active_meal(
             "Или выберите из готового списка:",
             reply_markup=diary_source_actions(meal_type),
         )
+        await send_quick_recent_foods(
+            callback.message,
+            recent_items,
+            meal_type,
+        )
     await callback.answer("Приём пищи изменён")
 
 
@@ -226,14 +243,19 @@ async def choose_meal(
     meal_type = MEAL_BUTTONS[message.text or ""]
     current = await state.get_data()
     snack_number = None
-    if meal_type == "snack":
-        current_number = current.get("snack_number")
-        if current.get("meal_type") == "snack" and isinstance(current_number, int):
-            snack_number = current_number
-        else:
-            async with session_factory() as session:
-                user = await ensure_user(session, message.from_user)
+    async with session_factory() as session:
+        user = await ensure_user(session, message.from_user)
+        if meal_type == "snack":
+            current_number = current.get("snack_number")
+            if current.get("meal_type") == "snack" and isinstance(current_number, int):
+                snack_number = current_number
+            else:
                 snack_number = next_snack_number(await today_entries(session, user))
+        recent_items = await recent_food_portions(
+            session,
+            user_id=user.id,
+            limit=5,
+        )
     await state.set_state(DiaryAdd.query)
     await state.set_data(
         {"meal_type": meal_type, "snack_number": snack_number}
@@ -247,12 +269,14 @@ async def choose_meal(
         "Можно также выбрать продукт из готового списка:",
         reply_markup=diary_source_actions(meal_type),
     )
+    await send_quick_recent_foods(message, recent_items, meal_type)
 
 
 @router.message(F.text == ADD_MORE_FOOD_TEXT)
 async def continue_adding_food(
     message: Message,
     state: FSMContext,
+    session_factory: async_sessionmaker,
 ) -> None:
     """Make the next product-add action explicit without leaving the active meal."""
     data = await state.get_data()
@@ -266,6 +290,16 @@ async def continue_adding_food(
         )
         return
 
+    recent_items = []
+    if message.from_user is not None:
+        async with session_factory() as session:
+            user = await ensure_user(session, message.from_user)
+            recent_items = await recent_food_portions(
+                session,
+                user_id=user.id,
+                limit=5,
+            )
+
     await continue_diary_addition(state, meal_type, snack_number)
     await message.answer(
         f"Добавляем ещё в «{meal_label(meal_type, snack_number)}». "
@@ -276,6 +310,7 @@ async def continue_adding_food(
         "Или выберите из готового списка:",
         reply_markup=diary_source_actions(meal_type),
     )
+    await send_quick_recent_foods(message, recent_items, meal_type)
 
 
 @router.message(F.text.in_(DIARY_FINISH_TEXTS))
@@ -444,6 +479,11 @@ async def search_product_for_diary(
             page = await search_foods_page(
                 session, user_id=user.id, query=message.text or "", page=0
             )
+            habitual_portions = await habitual_food_portions(
+                session,
+                user_id=user.id,
+                foods=page.items,
+            )
         except ValueError as error:
             await message.answer(str(error))
             return
@@ -458,6 +498,7 @@ async def search_product_for_diary(
             meal_type,
             page=page.page,
             total_pages=page.total_pages,
+            habitual_portions=habitual_portions,
         ),
     )
 
@@ -729,12 +770,18 @@ async def paginate_diary_search(
         page = await search_foods_page(
             session, user_id=user.id, query=query, page=requested_page
         )
+        habitual_portions = await habitual_food_portions(
+            session,
+            user_id=user.id,
+            foods=page.items,
+        )
     await callback.message.edit_reply_markup(
         reply_markup=diary_food_page(
             page.items,
             meal_type,
             page=page.page,
             total_pages=page.total_pages,
+            habitual_portions=habitual_portions,
         )
     )
     await callback.answer()
@@ -1102,6 +1149,96 @@ async def repeat_recent_food_portion(
     await deliver_calorie_alert(callback.message, alert, settings, session_factory)
 
 
+@router.callback_query(F.data.startswith("diary:habitual:"))
+async def add_habitual_food_portion(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    settings: Settings,
+) -> None:
+    """Add a stable habitual portion directly from search results."""
+    if not isinstance(callback.message, Message):
+        await callback.answer(
+            "Не удалось добавить продукт. Попробуйте снова.",
+            show_alert=True,
+        )
+        return
+    try:
+        _, _, meal_type, raw_food_id = (callback.data or "").split(":", 3)
+        food_id = int(raw_food_id)
+    except (ValueError, TypeError):
+        await callback.answer("Некорректный выбор", show_alert=True)
+        return
+    if meal_type not in MEAL_LABELS or food_id <= 0:
+        await callback.answer("Некорректный выбор", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        food = await load_food(session, user_id=user.id, food_id=food_id)
+        if food is None or food.nutrition_basis == "portion":
+            await callback.answer("Продукт недоступен", show_alert=True)
+            return
+        habitual = await habitual_food_portion(
+            session,
+            user_id=user.id,
+            food_id=food.id,
+        )
+        if habitual is None:
+            await callback.answer(
+                "Привычная порция изменилась. Откройте продукт и выберите вес.",
+                show_alert=True,
+            )
+            return
+        snack_number = await ensure_snack_context(
+            state,
+            session,
+            user,
+            meal_type,
+        )
+        previous_entries = await today_entries(session, user)
+        previous_total = summarize_entries(previous_entries).calories
+        entry = await add_diary_entry(
+            session,
+            user_id=user.id,
+            food=food,
+            meal_type=meal_type,
+            weight_grams=habitual,
+            snack_number=snack_number,
+        )
+        entries = await today_entries(session, user)
+        alert = await claim_alert_for_change(
+            session,
+            user=user,
+            previous_total=previous_total,
+            current_total=summarize_entries(entries).calories,
+            settings=settings,
+        )
+
+    await continue_diary_addition(state, meal_type, snack_number)
+    await send_post_add_confirmation(
+        callback.message,
+        entry=entry,
+        text=(
+            f"✅ Добавлено: {food.name}, {format_decimal(habitual)} г\n"
+            f"{format_decimal(entry.calories)} ккал · "
+            f"Б {format_decimal(entry.protein)} · "
+            f"Ж {format_decimal(entry.fat)} · "
+            f"У {format_decimal(entry.carbs)}\n\n"
+            f"{format_summary(entries)}"
+        ),
+        meal_type=meal_type,
+        snack_number=snack_number,
+    )
+    await callback.answer(f"Добавлено {format_decimal(habitual)} г")
+    await deliver_calorie_alert(
+        callback.message,
+        alert,
+        settings,
+        session_factory,
+    )
+
+
 @router.callback_query(F.data == "diary:noop")
 async def ignore_diary_page_counter(callback: CallbackQuery) -> None:
     """Acknowledge the inert page counter button."""
@@ -1453,6 +1590,20 @@ async def confirm_entry_deletion(
 async def cancel_entry_deletion(callback: CallbackQuery) -> None:
     """Dismiss entry deletion."""
     await callback.answer("Удаление отменено")
+
+
+async def send_quick_recent_foods(
+    message: Message,
+    items,
+    meal_type: str,
+) -> None:
+    """Expose recent portions directly on the active meal screen."""
+    if not items:
+        return
+    await message.answer(
+        "🕘 Последние порции — можно повторить одним нажатием:",
+        reply_markup=diary_recent_food_results(items, meal_type),
+    )
 
 
 async def send_post_add_confirmation(

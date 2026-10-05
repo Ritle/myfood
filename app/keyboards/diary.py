@@ -175,30 +175,27 @@ def diary_food_results(foods: list[Food], meal_type: str) -> InlineKeyboardMarku
 def diary_recent_food_results(
     items: list[RecentFoodPortion], meal_type: str
 ) -> InlineKeyboardMarkup:
-    """Offer weight editing and one-tap repeat for each recently used product."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    """Show recent foods with their last portion and a one-tap repeat."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in items:
+        amount = (
+            "1 порция"
+            if item.food.nutrition_basis == "portion"
+            else f"{format_decimal(item.weight_grams)} г"
+        )
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text=(
-                        f"{item.food.name[:32]} · добавить"
-                        if item.food.nutrition_basis == "portion"
-                        else f"{item.food.name[:32]} · изменить"
-                    ),
+                    text=f"{item.food.name[:28]} · {amount}",
                     callback_data=f"diary:add:{meal_type}:{item.food.id}",
                 ),
                 InlineKeyboardButton(
-                    text=(
-                        "↻ 1 порция"
-                        if item.food.nutrition_basis == "portion"
-                        else f"↻ {format_decimal(item.weight_grams)} г"
-                    ),
+                    text=f"↻ {amount}",
                     callback_data=f"diary:repeat:{meal_type}:{item.entry_id}",
                 ),
             ]
-            for item in items
-        ]
-    )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def diary_source_actions(meal_type: str) -> InlineKeyboardMarkup:
@@ -264,17 +261,35 @@ def meal_template_delete_confirmation(template_id: int) -> InlineKeyboardMarkup:
 
 
 def diary_food_page(
-    foods: list[Food], meal_type: str, *, page: int, total_pages: int
+    foods: list[Food],
+    meal_type: str,
+    *,
+    page: int,
+    total_pages: int,
+    habitual_portions: dict[int, Decimal] | None = None,
 ) -> InlineKeyboardMarkup:
-    """Build selectable diary results with page navigation."""
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=food_result_label(food), callback_data=f"diary:add:{meal_type}:{food.id}"
+    """Build search results with optional one-tap habitual portions."""
+    portions = habitual_portions or {}
+    rows: list[list[InlineKeyboardButton]] = []
+    for food in foods:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=food_result_label(food),
+                    callback_data=f"diary:add:{meal_type}:{food.id}",
+                )
+            ]
+        )
+        habitual = portions.get(food.id)
+        if habitual is not None:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"⭐ +{format_decimal(habitual)} г",
+                        callback_data=f"diary:habitual:{meal_type}:{food.id}",
+                    )
+                ]
             )
-        ]
-        for food in foods
-    ]
     if total_pages > 1:
         navigation = []
         if page > 0:

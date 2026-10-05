@@ -10,10 +10,12 @@ from app.keyboards.diary import (
     CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     diary_after_add_menu,
+    diary_food_page,
     diary_meal_switcher,
     diary_menu,
     diary_portion_keyboard,
     diary_post_add_actions,
+    diary_recent_food_results,
     finish_diary_adding_text,
 )
 from app.models import Base, DiaryDay, Food, FoodEntry, User
@@ -30,7 +32,7 @@ from app.services.diary import (
     summarize_entries,
     utc_day_bounds,
 )
-from app.services.foods import normalize_food_text
+from app.services.foods import RecentFoodPortion, normalize_food_text
 from app.utils.food_batches import parse_food_batch_input
 from app.utils.portions import parse_portion_input
 
@@ -106,6 +108,44 @@ def test_meal_switcher_is_only_explicit_override_control() -> None:
         ("🍽 Ужин", "diary:switch_meal:dinner"),
         ("🍎 Перекус", "diary:switch_meal:snack"),
     ]
+
+
+def test_recent_foods_show_last_portion_and_one_tap_repeat() -> None:
+    food = sample_food()
+    food.id = 7
+    item = RecentFoodPortion(
+        entry_id=19,
+        food=food,
+        weight_grams=Decimal(180),
+    )
+
+    keyboard = diary_recent_food_results([item], "lunch")
+    buttons = keyboard.inline_keyboard[0]
+
+    assert buttons[0].text == "Творог · 180 г"
+    assert buttons[0].callback_data == "diary:add:lunch:7"
+    assert buttons[1].text == "↻ 180 г"
+    assert buttons[1].callback_data == "diary:repeat:lunch:19"
+
+
+def test_search_result_has_one_tap_habitual_portion() -> None:
+    food = sample_food()
+    food.id = 8
+
+    keyboard = diary_food_page(
+        [food],
+        "breakfast",
+        page=0,
+        total_pages=1,
+        habitual_portions={8: Decimal(190)},
+    )
+
+    assert keyboard.inline_keyboard[0][0].callback_data == "diary:add:breakfast:8"
+    assert keyboard.inline_keyboard[1][0].text == "⭐ +190 г"
+    assert (
+        keyboard.inline_keyboard[1][0].callback_data
+        == "diary:habitual:breakfast:8"
+    )
 
 
 def test_post_add_actions_offer_edit_delete_and_exact_repeat() -> None:
