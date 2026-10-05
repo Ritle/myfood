@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,6 +160,46 @@ async def list_food_portion_history(
     )
     return list(result)
 
+
+
+async def list_food_portion_histories(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    food_ids: list[int],
+    limit_per_food: int = 12,
+) -> dict[int, list[Decimal]]:
+    """Return recent weighed portions for several foods in one query."""
+    if not food_ids:
+        return {}
+    limit = max(1, min(limit_per_food, 100))
+    ranked = (
+        select(
+            FoodEntry.food_id.label("food_id"),
+            FoodEntry.weight_grams.label("weight_grams"),
+            func.row_number()
+            .over(
+                partition_by=FoodEntry.food_id,
+                order_by=(FoodEntry.eaten_at.desc(), FoodEntry.id.desc()),
+            )
+            .label("row_number"),
+        )
+        .where(
+            FoodEntry.user_id == user_id,
+            FoodEntry.food_id.in_(food_ids),
+            FoodEntry.is_full_serving.is_(False),
+        )
+        .subquery()
+    )
+    rows = await session.execute(
+        select(ranked.c.food_id, ranked.c.weight_grams).where(
+            ranked.c.row_number <= limit
+        )
+    )
+    histories: dict[int, list[Decimal]] = {food_id: [] for food_id in food_ids}
+    for food_id, weight_grams in rows.all():
+        histories.setdefault(food_id, []).append(Decimal(weight_grams))
+    return histories
 
 
 async def food_meal_usage_counts(
