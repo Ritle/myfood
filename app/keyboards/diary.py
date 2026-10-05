@@ -298,7 +298,7 @@ def diary_post_add_actions(entry: FoodEntry) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="↻ Повторить",
             callback_data=(
-                f"diary:repeat:{entry.meal_type}:{entry.id}"
+                f"diary:repeat_entry:{entry.id}"
             ),
         )
     )
