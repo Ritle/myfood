@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.handlers.diary import format_diary, is_diary_search_text
 from app.keyboards.diary import (
     ADD_MORE_FOOD_TEXT,
+    CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     diary_after_add_menu,
+    diary_meal_switcher,
     diary_menu,
     diary_portion_keyboard,
     diary_post_add_actions,
@@ -54,10 +56,10 @@ def test_calculates_portion_with_consistent_rounding() -> None:
     assert portion.carbs == Decimal("5.40")
 
 
-def test_active_meal_entry_has_explicit_finish_action() -> None:
+def test_active_meal_entry_keeps_current_meal_without_reasking() -> None:
     active_labels = {
         button.text
-        for row in diary_menu(adding=True).keyboard
+        for row in diary_menu(adding=True, meal_type="lunch").keyboard
         for button in row
     }
     normal_labels = {
@@ -70,18 +72,40 @@ def test_active_meal_entry_has_explicit_finish_action() -> None:
         for row in diary_portion_keyboard().keyboard
         for button in row
     }
-
     after_add_labels = {
         button.text
         for row in diary_after_add_menu("breakfast").keyboard
         for button in row
     }
 
-    assert FINISH_DIARY_ADDING_TEXT in active_labels
+    assert CHANGE_MEAL_TEXT in active_labels
+    assert "✅ Завершить обед" in active_labels
+    assert "🍳 Завтрак" not in active_labels
+    assert "🍲 Обед" not in active_labels
+    assert "🍽 Ужин" not in active_labels
+    assert "🍎 Перекус" not in active_labels
+    assert "🍳 Завтрак" in normal_labels
     assert FINISH_DIARY_ADDING_TEXT in portion_labels
-    assert FINISH_DIARY_ADDING_TEXT not in normal_labels
     assert ADD_MORE_FOOD_TEXT in after_add_labels
+    assert CHANGE_MEAL_TEXT in after_add_labels
     assert "✅ Завершить завтрак" in after_add_labels
+    assert "🍲 Обед" not in after_add_labels
+
+
+def test_meal_switcher_is_only_explicit_override_control() -> None:
+    keyboard = diary_meal_switcher("lunch")
+    buttons = [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert buttons == [
+        ("🍳 Завтрак", "diary:switch_meal:breakfast"),
+        ("✓ 🍲 Обед", "diary:switch_meal:lunch"),
+        ("🍽 Ужин", "diary:switch_meal:dinner"),
+        ("🍎 Перекус", "diary:switch_meal:snack"),
+    ]
 
 
 def test_post_add_actions_offer_edit_delete_and_exact_repeat() -> None:
@@ -236,6 +260,7 @@ def test_diary_search_leaves_meal_and_navigation_buttons_for_their_handlers() ->
     assert not is_diary_search_text("↩️ Главное меню")
     assert not is_diary_search_text(FINISH_DIARY_ADDING_TEXT)
     assert not is_diary_search_text(ADD_MORE_FOOD_TEXT)
+    assert not is_diary_search_text(CHANGE_MEAL_TEXT)
     assert not is_diary_search_text("/today")
 
 
