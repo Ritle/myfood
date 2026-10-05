@@ -23,6 +23,7 @@ from app.keyboards.diary import (
     diary_meal_templates,
     diary_menu,
     diary_portion_keyboard,
+    diary_post_add_actions,
     diary_recent_food_results,
     diary_source_actions,
     frequent_combo_confirmation,
@@ -851,6 +852,96 @@ async def cancel_meal_template_deletion(callback: CallbackQuery) -> None:
     await callback.answer("Оставил шаблон")
 
 
+@router.callback_query(F.data.startswith("diary:repeat_entry:"))
+async def repeat_saved_diary_entry(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+    settings: Settings,
+) -> None:
+    """Repeat the exact diary entry referenced by a post-add confirmation."""
+    if not isinstance(callback.message, Message):
+        await callback.answer(
+            "Не удалось повторить запись. Попробуйте снова.",
+            show_alert=True,
+        )
+        return
+    entry_id = parse_callback_id(callback.data)
+    if entry_id is None:
+        await callback.answer("Некорректная запись", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        source_entry = await load_owned_entry(
+            session,
+            user_id=user.id,
+            entry_id=entry_id,
+        )
+        if source_entry is None or source_entry.food.is_archived:
+            await callback.answer(
+                "Запись или продукт больше недоступны.",
+                show_alert=True,
+            )
+            return
+
+        previous_entries = await today_entries(session, user)
+        previous_total = summarize_entries(previous_entries).calories
+        entry = await add_diary_entry(
+            session,
+            user_id=user.id,
+            food=source_entry.food,
+            meal_type=source_entry.meal_type,
+            weight_grams=source_entry.weight_grams,
+            snack_number=source_entry.snack_number,
+        )
+        entries = await today_entries(session, user)
+        alert = await claim_alert_for_change(
+            session,
+            user=user,
+            previous_total=previous_total,
+            current_total=summarize_entries(entries).calories,
+            settings=settings,
+        )
+
+    await continue_diary_addition(
+        state,
+        source_entry.meal_type,
+        source_entry.snack_number,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramAPIError:
+        pass
+
+    amount = (
+        "1 порция"
+        if entry.is_full_serving
+        else f"{format_decimal(entry.weight_grams)} г"
+    )
+    await send_post_add_confirmation(
+        callback.message,
+        entry=entry,
+        text=(
+            f"✅ Повторно добавлено: {entry.food.name}, {amount}\n"
+            f"{format_decimal(entry.calories)} ккал · "
+            f"Б {format_decimal(entry.protein)} · "
+            f"Ж {format_decimal(entry.fat)} · "
+            f"У {format_decimal(entry.carbs)}\n\n"
+            f"{format_summary(entries)}"
+        ),
+        meal_type=entry.meal_type,
+        snack_number=entry.snack_number,
+    )
+    await callback.answer("Добавлено")
+    await deliver_calorie_alert(
+        callback.message,
+        alert,
+        settings,
+        session_factory,
+    )
+
+
 @router.callback_query(F.data.startswith("diary:repeat:"))
 async def repeat_recent_food_portion(
     callback: CallbackQuery,
@@ -926,13 +1017,17 @@ async def repeat_recent_food_portion(
         if entry.is_full_serving
         else f"{format_decimal(entry.weight_grams)} г"
     )
-    await callback.message.answer(
-        f"✅ Повторно добавлено: {previous_entry.food.name}, {amount}\n"
-        f"{format_decimal(entry.calories)} ккал · "
-        f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
-        f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-        f"Добавить ещё в «{meal_label(meal_type, snack_number)}»?",
-        reply_markup=diary_after_add_menu(meal_type),
+    await send_post_add_confirmation(
+        callback.message,
+        entry=entry,
+        text=(
+            f"✅ Повторно добавлено: {previous_entry.food.name}, {amount}\n"
+            f"{format_decimal(entry.calories)} ккал · "
+            f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
+            f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}"
+        ),
+        meal_type=meal_type,
+        snack_number=snack_number,
     )
     await callback.answer("Добавлено")
     await deliver_calorie_alert(callback.message, alert, settings, session_factory)
@@ -1004,13 +1099,19 @@ async def select_diary_food(
     if entry is not None:
         await continue_diary_addition(state, meal_type, snack_number)
         if callback.message is not None:
-            await callback.message.answer(
-                f"✅ Добавлено блюдо целиком: {food.name}\n"
-                f"{format_decimal(entry.calories)} ккал · "
-                f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
-                f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-                f"Добавить ещё в «{meal_label(meal_type, snack_number)}»?",
-                reply_markup=diary_after_add_menu(meal_type),
+            await send_post_add_confirmation(
+                callback.message,
+                entry=entry,
+                text=(
+                    f"✅ Добавлено блюдо целиком: {food.name}\n"
+                    f"{format_decimal(entry.calories)} ккал · "
+                    f"Б {format_decimal(entry.protein)} · "
+                    f"Ж {format_decimal(entry.fat)} · "
+                    f"У {format_decimal(entry.carbs)}\n\n"
+                    f"{format_summary(entries)}"
+                ),
+                meal_type=meal_type,
+                snack_number=snack_number,
             )
             await deliver_calorie_alert(
                 callback.message, alert, settings, session_factory
@@ -1106,13 +1207,17 @@ async def enter_portion_weight(
         if entry.is_full_serving
         else f"{format_decimal(entry.weight_grams)} г"
     )
-    await message.answer(
-        f"✅ Добавлено: {food.name}, {amount}\n"
-        f"{format_decimal(entry.calories)} ккал · "
-        f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
-        f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}\n\n"
-        f"Добавить ещё в «{meal_label(meal_type, snack_number)}»?",
-        reply_markup=diary_after_add_menu(meal_type),
+    await send_post_add_confirmation(
+        message,
+        entry=entry,
+        text=(
+            f"✅ Добавлено: {food.name}, {amount}\n"
+            f"{format_decimal(entry.calories)} ккал · "
+            f"Б {format_decimal(entry.protein)} · Ж {format_decimal(entry.fat)} · "
+            f"У {format_decimal(entry.carbs)}\n\n{format_summary(entries)}"
+        ),
+        meal_type=meal_type,
+        snack_number=snack_number,
     )
     await deliver_calorie_alert(message, alert, settings, session_factory)
 
@@ -1132,6 +1237,7 @@ async def show_today_diary(message: Message, session_factory: async_sessionmaker
     await message.answer("Выберите действие или прием пищи.", reply_markup=diary_menu())
 
 
+@router.callback_query(F.data.startswith("diary:quick_edit:"))
 @router.callback_query(F.data.startswith("diary:edit:"))
 async def begin_entry_edit(
     callback: CallbackQuery, state: FSMContext, session_factory: async_sessionmaker
@@ -1153,9 +1259,21 @@ async def begin_entry_edit(
             show_alert=True,
         )
         return
+    quick_edit = (callback.data or "").startswith("diary:quick_edit:")
     await state.set_state(DiaryEdit.weight)
-    await state.update_data(entry_id=entry_id)
+    await state.set_data(
+        {
+            "entry_id": entry_id,
+            "return_meal_type": entry.meal_type if quick_edit else None,
+            "return_snack_number": entry.snack_number if quick_edit else None,
+        }
+    )
     if callback.message is not None:
+        if quick_edit:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramAPIError:
+                pass
         await callback.message.answer(
             f"Новый вес для «{entry.food.name}» в граммах:",
             reply_markup=ReplyKeyboardRemove(),
@@ -1196,18 +1314,40 @@ async def save_entry_edit(
             )
         else:
             alert = None
-    await state.clear()
     if entry is None:
+        await state.clear()
         await message.answer("Запись недоступна.", reply_markup=diary_menu())
         return
-    await message.answer(
-        f"Запись обновлена: {format_decimal(entry.weight_grams)} г, "
-        f"{format_decimal(entry.calories)} ккал.",
-        reply_markup=diary_menu(),
-    )
+
+    return_meal_type = data.get("return_meal_type")
+    return_snack_number = data.get("return_snack_number")
+    if return_meal_type in MEAL_LABELS:
+        await continue_diary_addition(
+            state,
+            return_meal_type,
+            return_snack_number,
+        )
+        await send_post_add_confirmation(
+            message,
+            entry=entry,
+            text=(
+                f"✅ Запись обновлена: {format_decimal(entry.weight_grams)} г, "
+                f"{format_decimal(entry.calories)} ккал."
+            ),
+            meal_type=return_meal_type,
+            snack_number=return_snack_number,
+        )
+    else:
+        await state.clear()
+        await message.answer(
+            f"Запись обновлена: {format_decimal(entry.weight_grams)} г, "
+            f"{format_decimal(entry.calories)} ккал.",
+            reply_markup=diary_menu(),
+        )
     await deliver_calorie_alert(message, alert, settings, session_factory)
 
 
+@router.callback_query(F.data.startswith("diary:quick_delete:"))
 @router.callback_query(F.data.startswith("diary:delete:"))
 async def request_entry_deletion(callback: CallbackQuery) -> None:
     """Request confirmation before deleting an entry."""
@@ -1216,6 +1356,11 @@ async def request_entry_deletion(callback: CallbackQuery) -> None:
         await callback.answer("Некорректная запись", show_alert=True)
         return
     if callback.message is not None:
+        if (callback.data or "").startswith("diary:quick_delete:"):
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramAPIError:
+                pass
         await callback.message.answer(
             "Удалить эту запись из дневника?",
             reply_markup=delete_confirmation(entry_id),
@@ -1244,6 +1389,25 @@ async def confirm_entry_deletion(
 async def cancel_entry_deletion(callback: CallbackQuery) -> None:
     """Dismiss entry deletion."""
     await callback.answer("Удаление отменено")
+
+
+async def send_post_add_confirmation(
+    message: Message,
+    *,
+    entry: FoodEntry,
+    text: str,
+    meal_type: str,
+    snack_number: int | None,
+) -> None:
+    """Show direct entry actions, then keep the active-meal keyboard available."""
+    await message.answer(
+        text,
+        reply_markup=diary_post_add_actions(entry),
+    )
+    await message.answer(
+        f"Добавить ещё в «{meal_label(meal_type, snack_number)}»?",
+        reply_markup=diary_after_add_menu(meal_type),
+    )
 
 
 async def continue_diary_addition(
