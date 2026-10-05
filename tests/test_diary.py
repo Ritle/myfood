@@ -11,9 +11,10 @@ from app.keyboards.diary import (
     diary_after_add_menu,
     diary_menu,
     diary_portion_keyboard,
+    diary_post_add_actions,
     finish_diary_adding_text,
 )
-from app.models import Base, DiaryDay, Food, User
+from app.models import Base, DiaryDay, Food, FoodEntry, User
 from app.services.diary import (
     add_diary_entries,
     add_diary_entry,
@@ -81,6 +82,56 @@ def test_active_meal_entry_has_explicit_finish_action() -> None:
     assert FINISH_DIARY_ADDING_TEXT not in normal_labels
     assert ADD_MORE_FOOD_TEXT in after_add_labels
     assert "✅ Завершить завтрак" in after_add_labels
+
+
+def test_post_add_actions_offer_edit_delete_and_exact_repeat() -> None:
+    entry = FoodEntry(
+        id=73,
+        food_id=5,
+        meal_type="lunch",
+        weight_grams=Decimal(180),
+        is_full_serving=False,
+        calories=Decimal(250),
+        protein=Decimal(40),
+        fat=Decimal(6),
+        carbs=Decimal(4),
+    )
+
+    keyboard = diary_post_add_actions(entry)
+    buttons = [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert buttons == [
+        ("⚖️ Изменить вес", "diary:quick_edit:73"),
+        ("🗑 Удалить", "diary:quick_delete:73"),
+        ("↻ Повторить", "diary:repeat_entry:73"),
+    ]
+
+
+def test_post_add_actions_hide_weight_edit_for_whole_dish() -> None:
+    entry = FoodEntry(
+        id=74,
+        food_id=6,
+        meal_type="dinner",
+        weight_grams=Decimal(1),
+        is_full_serving=True,
+        calories=Decimal(620),
+        protein=Decimal(32),
+        fat=Decimal(18),
+        carbs=Decimal(80),
+    )
+
+    keyboard = diary_post_add_actions(entry)
+    labels = [
+        button.text
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert labels == ["🗑 Удалить", "↻ Повторить"]
 
 
 def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
