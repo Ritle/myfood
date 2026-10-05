@@ -14,7 +14,7 @@ from app.keyboards.diary import (
     diary_post_add_actions,
     finish_diary_adding_text,
 )
-from app.models import Base, DiaryDay, Food, User
+from app.models import Base, DiaryDay, Food, FoodEntry, User
 from app.services.diary import (
     add_diary_entries,
     add_diary_entry,
