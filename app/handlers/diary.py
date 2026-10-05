@@ -885,6 +885,7 @@ async def repeat_saved_diary_entry(
             )
             return
 
+        source_name = source_entry.food.name
         previous_entries = await today_entries(session, user)
         previous_total = summarize_entries(previous_entries).calories
         entry = await add_diary_entry(
@@ -923,7 +924,7 @@ async def repeat_saved_diary_entry(
         callback.message,
         entry=entry,
         text=(
-            f"✅ Повторно добавлено: {entry.food.name}, {amount}\n"
+            f"✅ Повторно добавлено: {source_name}, {amount}\n"
             f"{format_decimal(entry.calories)} ккал · "
             f"Б {format_decimal(entry.protein)} · "
             f"Ж {format_decimal(entry.fat)} · "
@@ -1356,11 +1357,6 @@ async def request_entry_deletion(callback: CallbackQuery) -> None:
         await callback.answer("Некорректная запись", show_alert=True)
         return
     if callback.message is not None:
-        if (callback.data or "").startswith("diary:quick_delete:"):
-            try:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            except TelegramAPIError:
-                pass
         await callback.message.answer(
             "Удалить эту запись из дневника?",
             reply_markup=delete_confirmation(entry_id),
