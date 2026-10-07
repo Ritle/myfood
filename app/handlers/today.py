@@ -26,6 +26,7 @@ from app.services.water import get_water_for_day, total_water
 router = Router()
 
 MACRO_DETAIL_TEXTS = {
+    "🔥 Ккал подробнее": "calories",
     "🥩 Белки подробнее": "protein",
     "🥑 Жиры подробнее": "fat",
     "🍞 Углеводы подробнее": "carbs",
@@ -262,7 +263,7 @@ def parse_macro_detail_callback(
     if len(parts) != 4 or parts[:2] != ["today", "macro"]:
         return None
     macro = parts[2]
-    if macro not in {"protein", "fat", "carbs"}:
+    if macro not in {"calories", "protein", "fat", "carbs"}:
         return None
     try:
         report_day = date.fromisoformat(parts[3])
