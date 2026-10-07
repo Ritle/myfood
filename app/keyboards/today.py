@@ -15,6 +15,7 @@ def today_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍽 Что можно съесть?")],
+            [KeyboardButton(text="🔥 Ккал подробнее")],
             [
                 KeyboardButton(text="🥩 Белки подробнее"),
                 KeyboardButton(text="🥑 Жиры подробнее"),
@@ -45,15 +46,21 @@ def today_food_recommendations(
 
 
 def report_macro_details(day: date) -> InlineKeyboardMarkup:
-    """Open protein, fat, and carbohydrate source details for one report day."""
+    """Open calorie and macro source details for one report day."""
     token = day.isoformat()
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
+                    text="🔥 Ккал",
+                    callback_data=f"today:macro:calories:{token}",
+                ),
+                InlineKeyboardButton(
                     text="🥩 Белки",
                     callback_data=f"today:macro:protein:{token}",
                 ),
+            ],
+            [
                 InlineKeyboardButton(
                     text="🥑 Жиры",
                     callback_data=f"today:macro:fat:{token}",
@@ -62,6 +69,6 @@ def report_macro_details(day: date) -> InlineKeyboardMarkup:
                     text="🍞 Углеводы",
                     callback_data=f"today:macro:carbs:{token}",
                 ),
-            ]
+            ],
         ]
     )

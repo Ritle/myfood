@@ -29,9 +29,10 @@ class MacroSource:
 
 
 MACRO_FIELDS = {
-    "protein": ("🥩 Белки", "protein"),
-    "fat": ("🥑 Жиры", "fat"),
-    "carbs": ("🍞 Углеводы", "carbs"),
+    "calories": ("🔥 Калории", "calories", "ккал"),
+    "protein": ("🥩 Белки", "protein", "г"),
+    "fat": ("🥑 Жиры", "fat", "г"),
+    "carbs": ("🍞 Углеводы", "carbs", "г"),
 }
 MAX_MACRO_SOURCES = 20
 
@@ -144,7 +145,7 @@ def macro_sources(
     if macro not in MACRO_FIELDS:
         raise ValueError("unknown macro")
 
-    _, field = MACRO_FIELDS[macro]
+    _, field, _ = MACRO_FIELDS[macro]
     grouped: dict[int, tuple[str, Decimal, list[str]]] = {}
     for entry in entries:
         amount = Decimal(getattr(entry, field))
@@ -184,7 +185,7 @@ def format_macro_sources(
     """Explain which foods contributed to a day's protein, fat, or carbs."""
     if macro not in MACRO_FIELDS:
         raise ValueError("unknown macro")
-    label, _ = MACRO_FIELDS[macro]
+    label, _, unit = MACRO_FIELDS[macro]
     sources = macro_sources(entries, macro=macro)
     total = sum((source.amount for source in sources), Decimal(0))
 
@@ -194,10 +195,10 @@ def format_macro_sources(
     lines = [title, ""]
     if target is not None:
         lines.append(
-            f"Всего: {format_decimal(total)} / {format_decimal(target)} г"
+            f"Всего: {format_decimal(total)} / {format_decimal(target)} {unit}"
         )
     else:
-        lines.append(f"Всего: {format_decimal(total)} г")
+        lines.append(f"Всего: {format_decimal(total)} {unit}")
 
     if total <= 0:
         lines.extend(["", "За этот день источников пока нет."])
@@ -212,7 +213,7 @@ def format_macro_sources(
         meals = ", ".join(source.meal_labels)
         lines.append(
             f"{index}. {source.food_name} — "
-            f"{format_decimal(source.amount)} г ({share}%) · {meals}"
+            f"{format_decimal(source.amount)} {unit} ({share}%) · {meals}"
         )
 
     hidden = sources[MAX_MACRO_SOURCES:]
@@ -223,14 +224,20 @@ def format_macro_sources(
         ).quantize(Decimal(1), rounding=ROUND_HALF_UP)
         lines.append(
             f"… ещё {len(hidden)} источн. — "
-            f"{format_decimal(hidden_total)} г ({hidden_share}%)"
+            f"{format_decimal(hidden_total)} {unit} ({hidden_share}%)"
         )
 
     return "\n".join(lines)
 
 
 def macro_target(user: User, macro: str) -> Decimal | None:
-    """Return the user's target for one supported macro."""
+    """Return the user's target for one supported nutrient or calories."""
+    if macro == "calories":
+        return (
+            Decimal(user.daily_calorie_target)
+            if user.daily_calorie_target is not None
+            else None
+        )
     if macro == "protein":
         return user.daily_protein_target_g
     if macro == "fat":
