@@ -217,6 +217,83 @@ def test_macro_source_details_show_food_contribution_share_and_meals() -> None:
     assert "Яйца — 13 г (22%) · 🍳 Завтрак" in text
 
 
+def test_calorie_source_details_show_food_contribution_and_target() -> None:
+    chicken = Food(
+        id=21,
+        name="Куриная грудка",
+        name_normalized="куриная грудка",
+        calories_per_100g=Decimal(165),
+        protein_per_100g=Decimal(31),
+        fat_per_100g=Decimal("3.6"),
+        carbs_per_100g=Decimal(0),
+        is_public=True,
+    )
+    rice = Food(
+        id=22,
+        name="Рис",
+        name_normalized="рис",
+        calories_per_100g=Decimal(130),
+        protein_per_100g=Decimal("2.5"),
+        fat_per_100g=Decimal("0.3"),
+        carbs_per_100g=Decimal(28),
+        is_public=True,
+    )
+    entries = [
+        FoodEntry(
+            food_id=chicken.id,
+            food=chicken,
+            meal_type="lunch",
+            weight_grams=Decimal(100),
+            is_full_serving=False,
+            calories=Decimal(165),
+            protein=Decimal(31),
+            fat=Decimal("3.6"),
+            carbs=Decimal(0),
+        ),
+        FoodEntry(
+            food_id=chicken.id,
+            food=chicken,
+            meal_type="dinner",
+            weight_grams=Decimal(50),
+            is_full_serving=False,
+            calories=Decimal("82.5"),
+            protein=Decimal("15.5"),
+            fat=Decimal("1.8"),
+            carbs=Decimal(0),
+        ),
+        FoodEntry(
+            food_id=rice.id,
+            food=rice,
+            meal_type="lunch",
+            weight_grams=Decimal(100),
+            is_full_serving=False,
+            calories=Decimal(130),
+            protein=Decimal("2.5"),
+            fat=Decimal("0.3"),
+            carbs=Decimal(28),
+        ),
+    ]
+
+    sources = macro_sources(entries, macro="calories")
+    text = format_macro_sources(
+        entries,
+        macro="calories",
+        target=Decimal(2100),
+        day_label="07.10.2026",
+    )
+
+    assert [source.food_name for source in sources] == [
+        "Куриная грудка",
+        "Рис",
+    ]
+    assert sources[0].amount == Decimal("247.5")
+    assert sources[0].meal_labels == ("🍲 Обед", "🍽 Ужин")
+    assert "🔥 Калории — источники · 07.10.2026" in text
+    assert "Всего: 377.5 / 2100 ккал" in text
+    assert "Куриная грудка — 247.5 ккал (66%) · 🍲 Обед, 🍽 Ужин" in text
+    assert "Рис — 130 ккал (34%) · 🍲 Обед" in text
+
+
 def test_macro_source_details_handle_empty_day() -> None:
     text = format_macro_sources(
         [],
@@ -239,6 +316,7 @@ def test_report_macro_detail_keyboard_targets_exact_report_day() -> None:
     ]
 
     assert callbacks == [
+        "today:macro:calories:2026-10-03",
         "today:macro:protein:2026-10-03",
         "today:macro:fat:2026-10-03",
         "today:macro:carbs:2026-10-03",
