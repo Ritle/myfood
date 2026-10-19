@@ -165,6 +165,7 @@ async def open_diary(
 @router.message(F.text == ANALYZE_MEAL_TEXT)
 async def request_manual_meal_review(
     message: Message,
+    state: FSMContext,
     session_factory: async_sessionmaker,
 ) -> None:
     """Offer today's recorded main meals for an on-demand nutrition review."""
@@ -180,10 +181,21 @@ async def request_manual_meal_review(
         for meal_type in ("breakfast", "lunch", "dinner")
         if any(entry.meal_type == meal_type for entry in entries)
     ]
+    state_data = await state.get_data()
+    active_meal_type = state_data.get("meal_type")
+    active_adding = (
+        await state.get_state() == DiaryAdd.query.state
+        and active_meal_type in MEAL_LABELS
+    )
+    return_menu = diary_menu(
+        adding=active_adding,
+        meal_type=active_meal_type if active_adding else None,
+    )
+
     if not available_meals:
         await message.answer(
             "Сегодня ещё нет завтрака, обеда или ужина для анализа.",
-            reply_markup=diary_menu(),
+            reply_markup=return_menu,
         )
         return
 
@@ -196,6 +208,7 @@ async def request_manual_meal_review(
 @router.callback_query(F.data.startswith("diary:review:"))
 async def run_manual_meal_review(
     callback: CallbackQuery,
+    state: FSMContext,
     session_factory: async_sessionmaker,
 ) -> None:
     """Run the same adaptive meal analysis used after finishing a meal."""
@@ -241,10 +254,21 @@ async def run_manual_meal_review(
             latest_eaten_at=latest,
         )
 
+    state_data = await state.get_data()
+    active_meal_type = state_data.get("meal_type")
+    active_adding = (
+        await state.get_state() == DiaryAdd.query.state
+        and active_meal_type in MEAL_LABELS
+    )
+    return_menu = diary_menu(
+        adding=active_adding,
+        meal_type=active_meal_type if active_adding else None,
+    )
+
     if callback.message is not None:
         await callback.message.answer(
             analysis,
-            reply_markup=diary_menu(),
+            reply_markup=return_menu,
         )
     await callback.answer("Анализ готов")
 
