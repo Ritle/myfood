@@ -16,6 +16,7 @@ from app.utils.portions import QUICK_PORTIONS
 
 ADD_MORE_FOOD_TEXT = "➕ Добавить ещё"
 CHANGE_MEAL_TEXT = "🔄 Сменить приём пищи"
+ANALYZE_MEAL_TEXT = "📌 Анализ приёма пищи"
 FINISH_DIARY_ADDING_TEXT = "✅ Завершить добавление"
 FINISH_MEAL_TEXTS = {
     "breakfast": "✅ Завершить завтрак",
@@ -55,6 +56,7 @@ def diary_menu(
         ]
     rows.extend(
         [
+            [KeyboardButton(text=ANALYZE_MEAL_TEXT)],
             [KeyboardButton(text="📋 Дневник за сегодня")],
             [KeyboardButton(text="📚 Каталог продуктов")],
             [KeyboardButton(text="↩️ Главное меню")],
@@ -71,6 +73,7 @@ def diary_after_add_menu(meal_type: str) -> ReplyKeyboardMarkup:
             KeyboardButton(text=finish_diary_adding_text(meal_type)),
         ],
         [KeyboardButton(text=CHANGE_MEAL_TEXT)],
+        [KeyboardButton(text=ANALYZE_MEAL_TEXT)],
         [KeyboardButton(text="📋 Дневник за сегодня")],
         [KeyboardButton(text="📚 Каталог продуктов")],
         [KeyboardButton(text="↩️ Главное меню")],
@@ -133,6 +136,23 @@ def diary_meal_switcher(current_meal_type: str | None = None) -> InlineKeyboardM
                 InlineKeyboardButton(
                     text=label,
                     callback_data=f"diary:switch_meal:{meal_type}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def diary_meal_review_choices(meal_types: list[str]) -> InlineKeyboardMarkup:
+    """Offer manual nutrition analysis for recorded main meals."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for meal_type in ("breakfast", "lunch", "dinner"):
+        if meal_type not in meal_types:
+            continue
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"📌 {MEAL_LABELS[meal_type]}",
+                    callback_data=f"diary:review:{meal_type}",
                 )
             ]
         )
