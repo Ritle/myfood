@@ -7,11 +7,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.handlers.diary import format_diary, is_diary_search_text
 from app.keyboards.diary import (
     ADD_MORE_FOOD_TEXT,
+    ANALYZE_MEAL_TEXT,
     CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     diary_after_add_menu,
     diary_entry_meal_choices,
     diary_food_page,
+    diary_meal_review_choices,
     diary_meal_switcher,
     diary_menu,
     diary_portion_keyboard,
@@ -109,6 +111,37 @@ def test_meal_switcher_is_only_explicit_override_control() -> None:
         ("✓ 🍲 Обед", "diary:switch_meal:lunch"),
         ("🍽 Ужин", "diary:switch_meal:dinner"),
         ("🍎 Перекус", "diary:switch_meal:snack"),
+    ]
+
+
+def test_manual_meal_review_control_is_navigation_not_food_search() -> None:
+    normal_labels = {
+        button.text
+        for row in diary_menu().keyboard
+        for button in row
+    }
+    active_labels = {
+        button.text
+        for row in diary_after_add_menu("lunch").keyboard
+        for button in row
+    }
+
+    assert ANALYZE_MEAL_TEXT in normal_labels
+    assert ANALYZE_MEAL_TEXT in active_labels
+    assert not is_diary_search_text(ANALYZE_MEAL_TEXT)
+
+
+def test_manual_meal_review_choices_only_show_available_main_meals() -> None:
+    keyboard = diary_meal_review_choices(["breakfast", "dinner"])
+    buttons = [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert buttons == [
+        ("📌 🍳 Завтрак", "diary:review:breakfast"),
+        ("📌 🍽 Ужин", "diary:review:dinner"),
     ]
 
 

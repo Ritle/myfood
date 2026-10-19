@@ -79,6 +79,7 @@ def today_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🥑 Жиры подробнее"),
             ],
             [KeyboardButton(text="🍞 Углеводы подробнее")],
+            [KeyboardButton(text="📌 Анализ приёма пищи")],
             [KeyboardButton(text="↩️ Главное меню")],
         ],
         resize_keyboard=True,

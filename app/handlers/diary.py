@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.keyboards.diary import (
     ADD_MORE_FOOD_TEXT,
+    ANALYZE_MEAL_TEXT,
     CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     FINISH_MEAL_TEXTS,
@@ -22,6 +23,7 @@ from app.keyboards.diary import (
     diary_entry_meal_choices,
     diary_food_page,
     diary_food_results,
+    diary_meal_review_choices,
     diary_meal_switcher,
     diary_meal_templates,
     diary_menu,
@@ -106,6 +108,7 @@ DIARY_NAVIGATION_TEXTS = {
     "🌙 Завершить день",
     ADD_MORE_FOOD_TEXT,
     CHANGE_MEAL_TEXT,
+    ANALYZE_MEAL_TEXT,
     *DIARY_FINISH_TEXTS,
 }
 
@@ -157,6 +160,117 @@ async def open_diary(
         reply_markup=diary_source_actions(meal_type),
     )
     await send_quick_recent_foods(message, recent_items, meal_type)
+
+
+@router.message(F.text == ANALYZE_MEAL_TEXT)
+async def request_manual_meal_review(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Offer today's recorded main meals for an on-demand nutrition review."""
+    if message.from_user is None:
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, message.from_user)
+        entries = await today_entries(session, user)
+
+    available_meals = [
+        meal_type
+        for meal_type in ("breakfast", "lunch", "dinner")
+        if any(entry.meal_type == meal_type for entry in entries)
+    ]
+    state_data = await state.get_data()
+    active_meal_type = state_data.get("meal_type")
+    active_adding = (
+        await state.get_state() == DiaryAdd.query.state
+        and active_meal_type in MEAL_LABELS
+    )
+    return_menu = diary_menu(
+        adding=active_adding,
+        meal_type=active_meal_type if active_adding else None,
+    )
+
+    if not available_meals:
+        await message.answer(
+            "Сегодня ещё нет завтрака, обеда или ужина для анализа.",
+            reply_markup=return_menu,
+        )
+        return
+
+    await message.answer(
+        "Какой приём пищи проанализировать?",
+        reply_markup=diary_meal_review_choices(available_meals),
+    )
+
+
+@router.callback_query(F.data.startswith("diary:review:"))
+async def run_manual_meal_review(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Run the same adaptive meal analysis used after finishing a meal."""
+    meal_type = (callback.data or "").rsplit(":", 1)[-1]
+    if meal_type not in FINISH_MEAL_TEXTS:
+        await callback.answer("Некорректный приём пищи", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        day = await get_or_create_active_diary_day(session, user=user)
+        entries = await get_entries_for_day(
+            session,
+            user_id=user.id,
+            day=day.logical_date,
+            timezone_name=user.timezone,
+        )
+        latest = latest_meal_eaten_at(entries, meal_type)
+        if latest is None:
+            await callback.answer(
+                "В этом приёме пищи пока нет записей.",
+                show_alert=True,
+            )
+            return
+
+        analysis = format_meal_review(
+            user,
+            entries,
+            meal_type=meal_type,
+        )
+        if analysis is None:
+            await callback.answer(
+                "Для анализа сначала задайте цели КБЖУ в профиле.",
+                show_alert=True,
+            )
+            return
+
+        await record_nutrition_meal_review_sent(
+            session,
+            user_id=user.id,
+            local_date=day.logical_date,
+            meal_type=meal_type,
+            latest_eaten_at=latest,
+        )
+
+    state_data = await state.get_data()
+    active_meal_type = state_data.get("meal_type")
+    active_adding = (
+        await state.get_state() == DiaryAdd.query.state
+        and active_meal_type in MEAL_LABELS
+    )
+    return_menu = diary_menu(
+        adding=active_adding,
+        meal_type=active_meal_type if active_adding else None,
+    )
+
+    if callback.message is not None:
+        await callback.message.answer(
+            analysis,
+            reply_markup=return_menu,
+        )
+    await callback.answer("Анализ готов")
 
 
 @router.message(F.text == CHANGE_MEAL_TEXT)
