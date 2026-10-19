@@ -19,6 +19,7 @@ from app.keyboards.diary import (
     diary_after_add_menu,
     diary_batch_confirmation,
     diary_entry_actions,
+    diary_entry_meal_choices,
     diary_food_page,
     diary_food_results,
     diary_meal_switcher,
@@ -47,6 +48,7 @@ from app.services.diary import (
     get_entries_for_day,
     load_owned_entry,
     meal_label,
+    move_diary_entry,
     next_snack_number,
     remove_diary_entry,
     resize_diary_entry,
@@ -1441,6 +1443,107 @@ async def show_today_diary(message: Message, session_factory: async_sessionmaker
         return
     await message.answer(format_diary(entries), reply_markup=diary_entry_actions(entries))
     await message.answer("Выберите действие или прием пищи.", reply_markup=diary_menu())
+
+
+@router.callback_query(F.data.startswith("diary:move:"))
+async def request_entry_move(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Offer destination meals for one owned diary entry."""
+    entry_id = parse_callback_id(callback.data)
+    if entry_id is None:
+        await callback.answer("Некорректная запись", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        entry = await load_owned_entry(
+            session,
+            user_id=user.id,
+            entry_id=entry_id,
+        )
+        if entry is None:
+            await callback.answer("Запись недоступна", show_alert=True)
+            return
+        food_name = entry.food.name
+        current_label = meal_label(entry.meal_type, entry.snack_number)
+        current_meal_type = entry.meal_type
+
+    if callback.message is not None:
+        await callback.message.answer(
+            f"Перенести «{food_name}» из «{current_label}» в:",
+            reply_markup=diary_entry_meal_choices(
+                entry_id,
+                current_meal_type=current_meal_type,
+            ),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diary:move_to:"))
+async def move_entry_to_meal(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Move an owned diary entry to another meal without changing nutrition."""
+    try:
+        _, _, raw_entry_id, target_meal_type = (callback.data or "").split(":", 3)
+        entry_id = int(raw_entry_id)
+    except (ValueError, TypeError):
+        await callback.answer("Некорректный перенос", show_alert=True)
+        return
+
+    if entry_id <= 0 or target_meal_type not in MEAL_LABELS:
+        await callback.answer("Некорректный перенос", show_alert=True)
+        return
+
+    async with session_factory() as session:
+        user = await ensure_user(session, callback.from_user)
+        entry = await load_owned_entry(
+            session,
+            user_id=user.id,
+            entry_id=entry_id,
+        )
+        if entry is None:
+            await callback.answer("Запись недоступна", show_alert=True)
+            return
+
+        old_label = meal_label(entry.meal_type, entry.snack_number)
+        if entry.meal_type == target_meal_type:
+            await callback.answer(
+                f"Запись уже в «{old_label}»",
+                show_alert=True,
+            )
+            return
+
+        food_name = entry.food.name
+        snack_number = None
+        if target_meal_type == "snack":
+            snack_number = next_snack_number(await today_entries(session, user))
+
+        moved = await move_diary_entry(
+            session,
+            user_id=user.id,
+            entry_id=entry_id,
+            meal_type=target_meal_type,
+            snack_number=snack_number,
+        )
+        if moved is None:
+            await callback.answer("Запись недоступна", show_alert=True)
+            return
+        new_label = meal_label(moved.meal_type, moved.snack_number)
+
+    if callback.message is not None:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+        await callback.message.answer(
+            f"✅ «{food_name}» перенесено: {old_label} → {new_label}.",
+            reply_markup=diary_post_add_actions(moved),
+        )
+    await callback.answer("Перенесено")
 
 
 @router.callback_query(F.data.startswith("diary:quick_edit:"))

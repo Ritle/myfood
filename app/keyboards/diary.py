@@ -309,58 +309,84 @@ def diary_food_page(
 
 def diary_post_add_actions(entry: FoodEntry) -> InlineKeyboardMarkup:
     """Build direct actions for the entry that was just saved."""
-    buttons: list[InlineKeyboardButton] = []
+    first_row: list[InlineKeyboardButton] = []
     if not entry.is_full_serving:
-        buttons.append(
+        first_row.append(
             InlineKeyboardButton(
                 text="⚖️ Изменить вес",
                 callback_data=f"diary:quick_edit:{entry.id}",
             )
         )
-    buttons.append(
+    first_row.append(
+        InlineKeyboardButton(
+            text="🔄 Перенести",
+            callback_data=f"diary:move:{entry.id}",
+        )
+    )
+    second_row = [
         InlineKeyboardButton(
             text="🗑 Удалить",
             callback_data=f"diary:quick_delete:{entry.id}",
-        )
-    )
-    buttons.append(
+        ),
         InlineKeyboardButton(
             text="↻ Повторить",
-            callback_data=(
-                f"diary:repeat_entry:{entry.id}"
-            ),
-        )
-    )
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+            callback_data=f"diary:repeat_entry:{entry.id}",
+        ),
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[first_row, second_row])
 
 
 def diary_entry_actions(entries: list[FoodEntry]) -> InlineKeyboardMarkup:
-    """Build edit and delete actions for each diary entry."""
+    """Build edit, move, and delete actions for each diary entry."""
     rows: list[list[InlineKeyboardButton]] = []
     for entry in entries:
         short_name = entry.food.name[:24]
-        if entry.is_full_serving:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"🍽 {short_name}", callback_data="diary:noop"
-                    ),
-                    InlineKeyboardButton(
-                        text="🗑", callback_data=f"diary:delete:{entry.id}"
-                    ),
-                ]
+        main_button = (
+            InlineKeyboardButton(
+                text=f"🍽 {short_name}",
+                callback_data="diary:noop",
             )
-        else:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"✏️ {short_name}", callback_data=f"diary:edit:{entry.id}"
-                    ),
-                    InlineKeyboardButton(
-                        text="🗑", callback_data=f"diary:delete:{entry.id}"
-                    ),
-                ]
+            if entry.is_full_serving
+            else InlineKeyboardButton(
+                text=f"✏️ {short_name}",
+                callback_data=f"diary:edit:{entry.id}",
             )
+        )
+        rows.append(
+            [
+                main_button,
+                InlineKeyboardButton(
+                    text="🔄",
+                    callback_data=f"diary:move:{entry.id}",
+                ),
+                InlineKeyboardButton(
+                    text="🗑",
+                    callback_data=f"diary:delete:{entry.id}",
+                ),
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def diary_entry_meal_choices(
+    entry_id: int,
+    *,
+    current_meal_type: str,
+) -> InlineKeyboardMarkup:
+    """Choose a destination meal for one existing diary entry."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for meal_type in ("breakfast", "lunch", "dinner", "snack"):
+        label = MEAL_LABELS[meal_type]
+        if meal_type == current_meal_type:
+            label = f"✓ {label}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"diary:move_to:{entry_id}:{meal_type}",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

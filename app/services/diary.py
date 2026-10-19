@@ -245,6 +245,26 @@ async def resize_diary_entry(
     return await save_food_entry(session, entry)
 
 
+async def move_diary_entry(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    entry_id: int,
+    meal_type: str,
+    snack_number: int | None = None,
+) -> FoodEntry | None:
+    """Move an owned diary entry to another meal without changing its snapshot."""
+    if meal_type not in MEAL_TYPES:
+        raise ValueError("unknown meal type")
+    normalized_snack_number = validate_snack_number(meal_type, snack_number)
+    entry = await get_owned_food_entry(session, entry_id=entry_id, user_id=user_id)
+    if entry is None:
+        return None
+    entry.meal_type = meal_type
+    entry.snack_number = normalized_snack_number
+    return await save_food_entry(session, entry)
+
+
 async def remove_diary_entry(session: AsyncSession, *, user_id: int, entry_id: int) -> bool:
     """Delete an owned entry and report whether it existed."""
     entry = await get_owned_food_entry(session, entry_id=entry_id, user_id=user_id)

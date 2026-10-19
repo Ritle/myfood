@@ -10,6 +10,7 @@ from app.keyboards.diary import (
     CHANGE_MEAL_TEXT,
     FINISH_DIARY_ADDING_TEXT,
     diary_after_add_menu,
+    diary_entry_meal_choices,
     diary_food_page,
     diary_meal_switcher,
     diary_menu,
@@ -25,6 +26,7 @@ from app.services.diary import (
     calculate_portion,
     get_entries_for_day,
     meal_label,
+    move_diary_entry,
     next_snack_number,
     remove_diary_entry,
     resize_diary_entry,
@@ -170,6 +172,7 @@ def test_post_add_actions_offer_edit_delete_and_exact_repeat() -> None:
 
     assert buttons == [
         ("⚖️ Изменить вес", "diary:quick_edit:73"),
+        ("🔄 Перенести", "diary:move:73"),
         ("🗑 Удалить", "diary:quick_delete:73"),
         ("↻ Повторить", "diary:repeat_entry:73"),
     ]
@@ -195,7 +198,101 @@ def test_post_add_actions_hide_weight_edit_for_whole_dish() -> None:
         for button in row
     ]
 
-    assert labels == ["🗑 Удалить", "↻ Повторить"]
+    assert labels == ["🔄 Перенести", "🗑 Удалить", "↻ Повторить"]
+
+
+def test_entry_meal_choices_marks_current_meal() -> None:
+    keyboard = diary_entry_meal_choices(
+        81,
+        current_meal_type="lunch",
+    )
+    buttons = [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert buttons == [
+        ("🍳 Завтрак", "diary:move_to:81:breakfast"),
+        ("✓ 🍲 Обед", "diary:move_to:81:lunch"),
+        ("🍽 Ужин", "diary:move_to:81:dinner"),
+        ("🍎 Перекус", "diary:move_to:81:snack"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_move_diary_entry_changes_only_meal_metadata() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            owner = User(telegram_id=880, first_name="Owner")
+            stranger = User(telegram_id=881, first_name="Stranger")
+            food = sample_food()
+            session.add_all([owner, stranger, food])
+            await session.commit()
+            await session.refresh(owner)
+            await session.refresh(stranger)
+            await session.refresh(food)
+
+            entry = await add_diary_entry(
+                session,
+                user_id=owner.id,
+                food=food,
+                meal_type="lunch",
+                weight_grams=Decimal(180),
+            )
+            original = (
+                entry.weight_grams,
+                entry.calories,
+                entry.protein,
+                entry.fat,
+                entry.carbs,
+                entry.eaten_at,
+            )
+
+            assert (
+                await move_diary_entry(
+                    session,
+                    user_id=stranger.id,
+                    entry_id=entry.id,
+                    meal_type="breakfast",
+                )
+                is None
+            )
+
+            moved = await move_diary_entry(
+                session,
+                user_id=owner.id,
+                entry_id=entry.id,
+                meal_type="breakfast",
+            )
+            assert moved is not None
+            assert moved.meal_type == "breakfast"
+            assert moved.snack_number is None
+            assert (
+                moved.weight_grams,
+                moved.calories,
+                moved.protein,
+                moved.fat,
+                moved.carbs,
+                moved.eaten_at,
+            ) == original
+
+            moved_to_snack = await move_diary_entry(
+                session,
+                user_id=owner.id,
+                entry_id=entry.id,
+                meal_type="snack",
+                snack_number=3,
+            )
+            assert moved_to_snack is not None
+            assert moved_to_snack.meal_type == "snack"
+            assert moved_to_snack.snack_number == 3
+    finally:
+        await engine.dispose()
 
 
 def test_quick_portion_input_supports_common_measures_and_gram_weights() -> None:
