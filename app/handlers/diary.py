@@ -162,7 +162,6 @@ async def open_diary(
     await send_quick_recent_foods(message, recent_items, meal_type)
 
 
-
 @router.message(F.text == ANALYZE_MEAL_TEXT)
 async def request_manual_meal_review(
     message: Message,
