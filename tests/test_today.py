@@ -5,7 +5,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.keyboards.today import report_macro_details
+from app.keyboards.today import (
+    report_macro_details,
+    today_entry_meal_choices,
+    today_entry_move_actions,
+)
 from app.models import Base, Food, FoodEntry, NotificationLog, User
 from app.services.calorie_alerts import claim_calorie_alert, crossed_calorie_levels
 from app.services.today import format_macro_sources, format_today, macro_sources, progress_bar
@@ -321,3 +325,51 @@ def test_report_macro_detail_keyboard_targets_exact_report_day() -> None:
         "today:macro:fat:2026-10-03",
         "today:macro:carbs:2026-10-03",
     ]
+
+def test_today_entry_move_actions_show_meal_food_and_amount() -> None:
+    food = Food(
+        id=31,
+        name="Куриная грудка",
+        name_normalized="куриная грудка",
+        calories_per_100g=Decimal(165),
+        protein_per_100g=Decimal(31),
+        fat_per_100g=Decimal("3.6"),
+        carbs_per_100g=Decimal(0),
+        is_public=True,
+    )
+    entry = FoodEntry(
+        id=41,
+        food_id=food.id,
+        food=food,
+        meal_type="lunch",
+        weight_grams=Decimal(180),
+        is_full_serving=False,
+        calories=Decimal(297),
+        protein=Decimal("55.8"),
+        fat=Decimal("6.48"),
+        carbs=Decimal(0),
+    )
+
+    keyboard = today_entry_move_actions([entry])
+    button = keyboard.inline_keyboard[0][0]
+
+    assert button.callback_data == "today:move:41"
+    assert "🍲 Обед" in button.text
+    assert "Куриная грудка" in button.text
+    assert "180 г" in button.text
+
+
+def test_today_entry_meal_choices_mark_current_meal_and_allow_cancel() -> None:
+    keyboard = today_entry_meal_choices(41, current_meal_type="lunch")
+    buttons = [row[0] for row in keyboard.inline_keyboard]
+
+    assert [button.callback_data for button in buttons] == [
+        "today:move_to:41:breakfast",
+        "today:move_to:41:lunch",
+        "today:move_to:41:dinner",
+        "today:move_to:41:snack",
+        "today:move_cancel",
+    ]
+    assert buttons[1].text.startswith("✓ ")
+    assert buttons[-1].text == "↩️ Назад"
+

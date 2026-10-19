@@ -7,7 +7,65 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from app.models import FoodEntry
+from app.services.diary import meal_label
 from app.services.food_guidance import FoodRecommendation
+from app.utils.formatting import format_decimal
+
+
+def today_entry_move_actions(entries: list[FoodEntry]) -> InlineKeyboardMarkup:
+    """Offer direct meal reassignment for entries shown in the Today summary."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for entry in entries:
+        if entry.id is None:
+            continue
+        amount = (
+            "1 порция"
+            if entry.is_full_serving
+            else f"{format_decimal(entry.weight_grams)} г"
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        f"🔄 {meal_label(entry.meal_type, entry.snack_number)} · "
+                        f"{entry.food.name[:22]} · {amount}"
+                    ),
+                    callback_data=f"today:move:{entry.id}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def today_entry_meal_choices(
+    entry_id: int,
+    *,
+    current_meal_type: str,
+) -> InlineKeyboardMarkup:
+    """Choose a destination meal while keeping the Today summary in place."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for meal_type in ("breakfast", "lunch", "dinner", "snack"):
+        label = meal_label(meal_type)
+        if meal_type == current_meal_type:
+            label = f"✓ {label}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"today:move_to:{entry_id}:{meal_type}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="↩️ Назад",
+                callback_data="today:move_cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def today_menu() -> ReplyKeyboardMarkup:
